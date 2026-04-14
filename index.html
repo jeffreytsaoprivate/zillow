@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Newton/Brookline MA · Property Intelligence</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<style>
+  :root {
+    --ink: #0f0e0b;
+    --paper: #f5f2eb;
+    --cream: #ede9df;
+    --rule: #d4cfc3;
+    --accent: #b85c2a;
+    --accent2: #2a6b8a;
+    --accent3: #3d7a4f;
+    --highlight: #f0c040;
+    --highlight-bg: rgba(240,192,64,0.15);
+    --highlight-ring: rgba(184,92,42,0.6);
+    --muted: #7a7469;
+    --mono: 'DM Mono', monospace;
+    --serif: 'DM Serif Display', serif;
+    --sans: 'Instrument Sans', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    min-height: 100vh;
+  }
+
+  /* ── HEADER ── */
+  header {
+    border-bottom: 2px solid var(--ink);
+    padding: 24px 48px 20px;
+    display: flex;
+    align-items: baseline;
+    gap: 24px;
+    background: var(--paper);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .logo {
+    font-family: var(--serif);
+    font-size: 28px;
+    letter-spacing: -0.5px;
+    line-height: 1;
+  }
+  .logo span { color: var(--accent); font-style: italic; }
+  .subtitle {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding-bottom: 2px;
+  }
+  .header-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  #upload-btn {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 8px 18px;
+    border: 1.5px solid var(--ink);
+    background: var(--ink);
+    color: var(--paper);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  #upload-btn:hover { background: var(--accent); border-color: var(--accent); }
+  #file-input { display: none; }
+  #prop-count {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  /* ── UPLOAD SCREEN ── */
+  #upload-screen {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: calc(100vh - 80px);
+    gap: 24px;
+  }
+  .drop-zone {
+    width: 480px;
+    border: 2px dashed var(--rule);
+    padding: 64px 48px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: var(--cream);
+  }
+  .drop-zone:hover, .drop-zone.drag-over {
+    border-color: var(--accent);
+    background: var(--paper);
+  }
+  .drop-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+    opacity: 0.4;
+  }
+  .drop-title {
+    font-family: var(--serif);
+    font-size: 22px;
+    margin-bottom: 8px;
+  }
+  .drop-sub {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    letter-spacing: 0.05em;
+  }
+  .demo-btn {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--accent2);
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-decoration: underline;
+    letter-spacing: 0.05em;
+  }
+
+  /* ── DASHBOARD ── */
+  #dashboard { display: none; padding: 0; }
+
+  /* ── STATS BAR ── */
+  .stats-bar {
+    display: flex;
+    border-bottom: 1px solid var(--rule);
+    background: var(--cream);
+  }
+  .stat-cell {
+    flex: 1;
+    padding: 14px 24px;
+    border-right: 1px solid var(--rule);
+  }
+  .stat-cell:last-child { border-right: none; }
+  .stat-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .stat-value {
+    font-family: var(--serif);
+    font-size: 20px;
+    color: var(--ink);
+  }
+
+  /* ── LAYOUT GRID ── */
+  .dash-grid {
+    display: grid;
+    grid-template-rows: auto auto;
+    gap: 0;
+  }
+
+  /* ── SECTION HEADER ── */
+  .section-head {
+    padding: 16px 48px 12px;
+    border-bottom: 1px solid var(--rule);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--paper);
+  }
+  .section-num {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: 0.1em;
+  }
+  .section-title {
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .section-note {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  /* ── TABLE ── */
+  .table-wrap {
+    overflow-x: auto;
+    max-height: 320px;
+    overflow-y: auto;
+    border-bottom: 2px solid var(--ink);
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+  }
+  thead th {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--ink);
+    color: var(--paper);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 10px 14px;
+    text-align: left;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+  }
+  thead th:hover { background: var(--accent); }
+  thead th .sort-arrow { margin-left: 4px; opacity: 0.5; }
+  thead th.sorted .sort-arrow { opacity: 1; color: var(--highlight); }
+  tbody tr {
+    border-bottom: 1px solid var(--rule);
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  tbody tr:hover { background: var(--cream); }
+  tbody tr.highlighted {
+    background: var(--highlight-bg) !important;
+    outline: 2px solid var(--highlight-ring);
+    outline-offset: -2px;
+  }
+  tbody td {
+    padding: 8px 14px;
+    font-family: var(--sans);
+    color: var(--ink);
+    white-space: nowrap;
+  }
+  tbody td.addr { font-weight: 600; }
+  tbody td.num {
+    font-family: var(--mono);
+    font-size: 12px;
+    text-align: right;
+  }
+  tbody td a {
+    color: var(--accent2);
+    text-decoration: none;
+    font-size: 11px;
+  }
+  tbody td a:hover { text-decoration: underline; }
+
+  /* ── VIZ ROW ── */
+  .viz-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border-top: 1px solid var(--rule);
+  }
+
+  /* ── SCATTER ── */
+  .scatter-wrap {
+    border-right: 1px solid var(--rule);
+    padding: 0;
+  }
+  #scatter-svg {
+    display: block;
+    width: 100%;
+  }
+  .axis-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    fill: var(--muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .tick text {
+    font-family: var(--mono);
+    font-size: 10px;
+    fill: var(--muted);
+  }
+  .tick line, .domain { stroke: var(--rule); }
+  .grid line { stroke: var(--rule); stroke-dasharray: 3,3; }
+
+  .dot {
+    cursor: pointer;
+    transition: r 0.15s, opacity 0.15s;
+    stroke: var(--paper);
+    stroke-width: 1.5;
+  }
+  .dot:hover { stroke: var(--ink); stroke-width: 2; }
+  .dot.highlighted {
+    stroke: var(--accent);
+    stroke-width: 3;
+    filter: drop-shadow(0 0 6px rgba(184,92,42,0.5));
+  }
+  .dot.dimmed { opacity: 0.2; }
+
+  /* tooltip */
+  #tooltip {
+    position: fixed;
+    background: var(--ink);
+    color: var(--paper);
+    padding: 10px 14px;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.7;
+    pointer-events: none;
+    z-index: 1000;
+    display: none;
+    max-width: 260px;
+    border-left: 3px solid var(--accent);
+  }
+  #tooltip strong {
+    font-family: var(--sans);
+    font-size: 12px;
+    display: block;
+    margin-bottom: 4px;
+    color: var(--highlight);
+  }
+
+  /* ── MAP ── */
+  .map-wrap { position: relative; }
+  #map {
+    width: 100%;
+    height: 100%;
+    min-height: 460px;
+  }
+
+  /* leaflet overrides */
+  .leaflet-container { background: var(--cream); font-family: var(--sans); }
+  .leaflet-popup-content-wrapper {
+    background: var(--ink);
+    color: var(--paper);
+    border-radius: 0;
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.8;
+    border-left: 3px solid var(--accent);
+    padding: 0;
+  }
+  .leaflet-popup-content { margin: 12px 16px; }
+  .leaflet-popup-content strong {
+    font-family: var(--sans);
+    font-size: 13px;
+    color: var(--highlight);
+    display: block;
+    margin-bottom: 6px;
+  }
+  .leaflet-popup-content a {
+    color: #7ecbf5;
+    text-decoration: none;
+    display: inline-block;
+    margin-top: 6px;
+    font-size: 11px;
+  }
+  .leaflet-popup-tip { background: var(--ink); }
+  .leaflet-popup-close-button { color: var(--paper) !important; font-size: 18px !important; top: 6px !important; right: 8px !important; }
+
+  /* ── LEGEND ── */
+  .legend {
+    position: absolute;
+    bottom: 16px;
+    left: 16px;
+    background: rgba(15,14,11,0.85);
+    color: var(--paper);
+    padding: 10px 14px;
+    font-family: var(--mono);
+    font-size: 10px;
+    z-index: 400;
+    border-left: 3px solid var(--accent3);
+    line-height: 1.9;
+    pointer-events: none;
+  }
+  .legend-title { color: var(--highlight); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 4px; }
+  .legend-row { display: flex; align-items: center; gap: 8px; }
+  .legend-dot { border-radius: 50%; background: var(--accent3); border: 2px solid var(--paper); flex-shrink: 0; }
+
+  /* responsive */
+  @media (max-width: 900px) {
+    .viz-row { grid-template-columns: 1fr; }
+    .scatter-wrap { border-right: none; border-bottom: 1px solid var(--rule); }
+    header { padding: 16px 20px; }
+    .section-head { padding: 12px 20px; }
+    .stats-bar { overflow-x: auto; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Newton/Brookline <span>Properties</span></div>
+  <div class="subtitle">Zillow · Market Intelligence</div>
+  <div class="header-right">
+    <span id="prop-count"></span>
+    <button id="upload-btn" onclick="document.getElementById('file-input').click()">↑ Load JSON</button>
+    <input type="file" id="file-input" accept=".json">
+  </div>
+</header>
+
+<div id="upload-screen">
+  <div class="drop-zone" id="drop-zone">
+    <div class="drop-icon">⌂</div>
+    <div class="drop-title">Drop your Zillow JSON</div>
+    <div class="drop-sub">or click to browse · .json files only</div>
+  </div>
+  <button class="demo-btn" id="demo-btn">↗ Load embedded sample data</button>
+</div>
+
+<div id="dashboard">
+  <div class="stats-bar" id="stats-bar"></div>
+  <div class="dash-grid">
+    <!-- TABLE -->
+    <div class="section-head">
+      <span class="section-num">01</span>
+      <span class="section-title">Listings</span>
+      <span class="section-note">Hover any row · click to highlight across views</span>
+    </div>
+    <div class="table-wrap">
+      <table id="prop-table">
+        <thead>
+          <tr>
+            <th data-col="address">Address <span class="sort-arrow">↕</span></th>
+            <th data-col="city">City <span class="sort-arrow">↕</span></th>
+            <th data-col="homeType">Type <span class="sort-arrow">↕</span></th>
+            <th data-col="price">Price <span class="sort-arrow">↕</span></th>
+            <th data-col="livingArea">Home Size <span class="sort-arrow">↕</span></th>
+            <th data-col="lotAcres">Lot (acres) <span class="sort-arrow">↕</span></th>
+            <th data-col="pricePerAcre">$/Acre <span class="sort-arrow">↕</span></th>
+            <th data-col="days_on_zillow">Days Listed <span class="sort-arrow">↕</span></th>
+            <th data-col="bedrooms">Beds <span class="sort-arrow">↕</span></th>
+            <th data-col="bathrooms">Baths <span class="sort-arrow">↕</span></th>
+            <th>Link</th>
+          </tr>
+        </thead>
+        <tbody id="table-body"></tbody>
+      </table>
+    </div>
+
+    <!-- VIZ ROW -->
+    <div class="section-head">
+      <span class="section-num">02</span>
+      <span class="section-title">Price vs Lot Size</span>
+      <span class="section-note">Circle size = lot size ÷ price · color = $/acre</span>
+    </div>
+    <div class="viz-row">
+      <div class="scatter-wrap">
+        <svg id="scatter-svg"></svg>
+      </div>
+      <div class="map-wrap">
+        <div class="section-head" style="border-bottom:1px solid var(--rule); border-top:1px solid var(--rule);">
+          <span class="section-num">03</span>
+          <span class="section-title">Map View</span>
+          <span class="section-note">Circle = lot÷price · click for details</span>
+        </div>
+        <div id="map"></div>
+        <div class="legend" id="map-legend">
+          <div class="legend-title">Circle size</div>
+          <div class="legend-row"><div class="legend-dot" style="width:8px;height:8px;"></div> Small lot/price</div>
+          <div class="legend-row"><div class="legend-dot" style="width:16px;height:16px;"></div> Medium</div>
+          <div class="legend-row"><div class="legend-dot" style="width:26px;height:26px;"></div> Large lot/price</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="tooltip"></div>
+
+<!-- Leaflet -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
+<script>
+// ── STATE ──────────────────────────────────────────────────────────
+let allData = [];
+let highlighted = null;
+let sortCol = 'price';
+let sortDir = 1;
+let leafletMap, leafletMarkers = [];
+
+// ── FILE UPLOAD ────────────────────────────────────────────────────
+const fileInput = document.getElementById('file-input');
+const dropZone  = document.getElementById('drop-zone');
+
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) readFile(file);
+});
+fileInput.addEventListener('change', e => { if (e.target.files[0]) readFile(e.target.files[0]); });
+document.getElementById('demo-btn').addEventListener('click', () => {
+  alert('Please upload the Zillow JSON file using the Load JSON button.');
+});
+
+function readFile(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const json = JSON.parse(e.target.result);
+      initDashboard(Array.isArray(json) ? json : [json]);
+    } catch(err) { alert('Could not parse JSON: ' + err.message); }
+  };
+  reader.readAsText(file);
+}
+
+// ── PREPARE DATA ───────────────────────────────────────────────────
+function prepareData(raw) {
+  return raw.map((d, i) => {
+    const lotSqFt = d.lotSize || d.lotAreaValue || 0;
+    const lotAcres = lotSqFt / 43560;
+    const price = d.price || 0;
+    const pricePerAcre = lotAcres > 0 ? price / lotAcres : null;
+    const lotPerPriceMperAcre = price > 0 ? (lotAcres / (price / 1e6)) : null;
+    const addr = d.streetAddress || (d.address && d.address.streetAddress) || 'Unknown';
+    const city  = d.city || (d.address && d.address.city) || '';
+    return {
+      id: i,
+      address: addr,
+      city,
+      homeType: fmt_type(d.homeType),
+      price,
+      livingArea: d.livingArea || d.livingAreaValue || 0,
+      lotSqFt,
+      lotAcres,
+      pricePerAcre,
+      lotPerPriceMperAcre,
+      days_on_zillow: d.days_on_zillow ?? null,
+      bedrooms: d.bedrooms ?? null,
+      bathrooms: d.bathrooms ?? null,
+      latitude: d.latitude,
+      longitude: d.longitude,
+      hdpUrl: d.hdpUrl || null,
+      description: d.description || '',
+    };
+  }).filter(d => d.price > 0 && d.latitude && d.longitude);
+}
+
+function fmt_type(t) {
+  if (!t) return '—';
+  return t.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+// ── INIT ───────────────────────────────────────────────────────────
+function initDashboard(raw) {
+  allData = prepareData(raw);
+  document.getElementById('upload-screen').style.display = 'none';
+  document.getElementById('dashboard').style.display = 'block';
+  document.getElementById('prop-count').textContent = allData.length + ' listings';
+
+  renderStats();
+  renderTable();
+  renderScatter();
+  renderMap();
+}
+
+// ── STATS ──────────────────────────────────────────────────────────
+function renderStats() {
+  const prices = allData.map(d => d.price).filter(Boolean);
+  const avgPrice = prices.reduce((a,b) => a+b, 0) / prices.length;
+  const medPrice = [...prices].sort((a,b)=>a-b)[Math.floor(prices.length/2)];
+  const avgLot = allData.map(d=>d.lotAcres).filter(Boolean).reduce((a,b)=>a+b,0)/allData.length;
+  const avgDays = allData.map(d=>d.days_on_zillow).filter(v=>v!=null).reduce((a,b)=>a+b,0)/allData.filter(d=>d.days_on_zillow!=null).length;
+
+  const stats = [
+    { label:'Listings', value: allData.length },
+    { label:'Avg Price', value:'$'+fmt_money(avgPrice) },
+    { label:'Median Price', value:'$'+fmt_money(medPrice) },
+    { label:'Avg Lot Size', value: avgLot.toFixed(3)+' ac' },
+    { label:'Avg Days Listed', value: avgDays.toFixed(0)+' days' },
+  ];
+  const bar = document.getElementById('stats-bar');
+  bar.innerHTML = stats.map(s => `
+    <div class="stat-cell">
+      <div class="stat-label">${s.label}</div>
+      <div class="stat-value">${s.value}</div>
+    </div>`).join('');
+}
+
+function fmt_money(v) {
+  if (v >= 1e6) return (v/1e6).toFixed(2)+'M';
+  if (v >= 1e3) return (v/1e3).toFixed(0)+'K';
+  return Math.round(v);
+}
+
+// ── TABLE ──────────────────────────────────────────────────────────
+function renderTable() {
+  const sorted = [...allData].sort((a,b) => {
+    const va = a[sortCol], vb = b[sortCol];
+    if (va == null) return 1; if (vb == null) return -1;
+    return sortDir * (va < vb ? -1 : va > vb ? 1 : 0);
+  });
+
+  const tbody = document.getElementById('table-body');
+  tbody.innerHTML = sorted.map(d => `
+    <tr data-id="${d.id}" class="${highlighted === d.id ? 'highlighted' : ''}">
+      <td class="addr">${d.address}</td>
+      <td>${d.city}</td>
+      <td>${d.homeType}</td>
+      <td class="num">$${fmt_money(d.price)}</td>
+      <td class="num">${d.livingArea ? d.livingArea.toLocaleString()+' sqft' : '—'}</td>
+      <td class="num">${d.lotAcres > 0 ? d.lotAcres.toFixed(3) : '—'}</td>
+      <td class="num">${d.pricePerAcre ? '$'+fmt_money(d.pricePerAcre) : '—'}</td>
+      <td class="num">${d.days_on_zillow ?? '—'}</td>
+      <td class="num">${d.bedrooms ?? '—'}</td>
+      <td class="num">${d.bathrooms ?? '—'}</td>
+      <td>${d.hdpUrl ? `<a href="${d.hdpUrl}" target="_blank" rel="noopener">Zillow ↗</a>` : '—'}</td>
+    </tr>`).join('');
+
+  // row events
+  tbody.querySelectorAll('tr').forEach(tr => {
+    tr.addEventListener('mouseenter', () => setHighlight(+tr.dataset.id));
+    tr.addEventListener('mouseleave', () => setHighlight(null));
+    tr.addEventListener('click', () => setHighlight(+tr.dataset.id, true));
+  });
+
+  // sort headers
+  document.querySelectorAll('thead th[data-col]').forEach(th => {
+    th.classList.remove('sorted');
+    if (th.dataset.col === sortCol) th.classList.add('sorted');
+    th.onclick = () => {
+      if (sortCol === th.dataset.col) sortDir *= -1; else sortDir = -1;
+      sortCol = th.dataset.col;
+      renderTable();
+    };
+  });
+}
+
+function scrollToRow(id) {
+  const tr = document.querySelector(`#table-body tr[data-id="${id}"]`);
+  if (tr) tr.scrollIntoView({ behavior:'smooth', block:'nearest' });
+}
+
+// ── SCATTER ────────────────────────────────────────────────────────
+let scatterSvg;
+const colorScale = d3.scaleSequential(d3.interpolateRdYlGn);
+
+function renderScatter() {
+  const container = document.getElementById('scatter-svg');
+  const W = container.closest('.scatter-wrap').clientWidth || 500;
+  const H = 460;
+  const M = { top: 32, right: 32, bottom: 60, left: 70 };
+  const iW = W - M.left - M.right;
+  const iH = H - M.top - M.bottom;
+
+  d3.select('#scatter-svg').selectAll('*').remove();
+
+  const svg = d3.select('#scatter-svg')
+    .attr('viewBox', `0 0 ${W} ${H}`)
+    .attr('width', W).attr('height', H);
+
+  scatterSvg = svg;
+
+  const data = allData.filter(d => d.lotAcres > 0 && d.price > 0);
+
+  const xScale = d3.scaleLinear()
+    .domain([0, d3.max(data, d => d.lotAcres) * 1.08])
+    .range([0, iW]);
+  const yScale = d3.scaleLinear()
+    .domain([0, d3.max(data, d => d.price) * 1.08])
+    .range([iH, 0]);
+
+  // color by lotPerPriceMperAcre
+  const cExt = d3.extent(data, d => d.lotPerPriceMperAcre || 0);
+  colorScale.domain(cExt);
+
+  const g = svg.append('g').attr('transform', `translate(${M.left},${M.top})`);
+
+  // grid
+  g.append('g').attr('class','grid')
+    .call(d3.axisLeft(yScale).tickSize(-iW).tickFormat(''))
+    .select('.domain').remove();
+  g.append('g').attr('class','grid')
+    .attr('transform',`translate(0,${iH})`)
+    .call(d3.axisBottom(xScale).tickSize(-iH).tickFormat(''))
+    .select('.domain').remove();
+
+  // axes
+  g.append('g').attr('transform',`translate(0,${iH})`)
+    .call(d3.axisBottom(xScale).ticks(6).tickFormat(d => d.toFixed(2)+' ac'));
+  g.append('g')
+    .call(d3.axisLeft(yScale).ticks(6).tickFormat(d => '$'+fmt_money(d)));
+
+  // axis labels
+  g.append('text').attr('class','axis-label')
+    .attr('x', iW/2).attr('y', iH+46).attr('text-anchor','middle')
+    .text('Lot Size (acres)');
+  g.append('text').attr('class','axis-label')
+    .attr('transform','rotate(-90)')
+    .attr('x', -iH/2).attr('y', -54).attr('text-anchor','middle')
+    .text('Price (USD)');
+
+  // dots
+  const rScale = d3.scaleSqrt()
+    .domain([0, d3.max(data, d => d.lotPerPriceMperAcre || 0)])
+    .range([4, 16]);
+
+  g.selectAll('.dot').data(data).enter().append('circle')
+    .attr('class','dot')
+    .attr('data-id', d => d.id)
+    .attr('cx', d => xScale(d.lotAcres))
+    .attr('cy', d => yScale(d.price))
+    .attr('r',  d => rScale(d.lotPerPriceMperAcre || 0))
+    .attr('fill', d => colorScale(d.lotPerPriceMperAcre || 0))
+    .on('mouseenter', function(event, d) {
+      setHighlight(d.id);
+      showTooltip(event, d);
+    })
+    .on('mousemove', function(event, d) { moveTooltip(event); })
+    .on('mouseleave', function() { setHighlight(null); hideTooltip(); })
+    .on('click', function(event, d) { setHighlight(d.id, true); scrollToRow(d.id); });
+
+  // colorbar legend
+  const defs = svg.append('defs');
+  const lg = defs.append('linearGradient').attr('id','colorbar').attr('x1','0%').attr('x2','100%');
+  for (let i=0; i<=10; i++) {
+    lg.append('stop').attr('offset', i*10+'%')
+      .attr('stop-color', colorScale(cExt[0] + i/10*(cExt[1]-cExt[0])));
+  }
+  const cbW = 120, cbH = 8;
+  const cbX = W - M.right - cbW;
+  const cbY = M.top - 20;
+  svg.append('rect').attr('x',cbX).attr('y',cbY).attr('width',cbW).attr('height',cbH)
+    .attr('fill','url(#colorbar)').attr('rx',2);
+  svg.append('text').attr('class','axis-label').attr('x',cbX).attr('y',cbY-3).attr('font-size',9)
+    .text('Low lot/price$M');
+  svg.append('text').attr('class','axis-label').attr('x',cbX+cbW).attr('y',cbY-3).attr('text-anchor','end').attr('font-size',9)
+    .text('High');
+}
+
+// ── MAP ────────────────────────────────────────────────────────────
+function renderMap() {
+  if (leafletMap) { leafletMap.remove(); leafletMap = null; leafletMarkers = []; }
+
+  const center = [
+    d3.mean(allData, d => d.latitude),
+    d3.mean(allData, d => d.longitude)
+  ];
+
+  leafletMap = L.map('map', { zoomControl: true, attributionControl: false }).setView(center, 13);
+
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© CartoDB',
+    subdomains: 'abcd', maxZoom: 19
+  }).addTo(leafletMap);
+
+  const rScale = d3.scaleSqrt()
+    .domain(d3.extent(allData, d => d.lotPerPriceMperAcre || 0))
+    .range([6, 28]);
+
+  allData.forEach(d => {
+    if (!d.latitude || !d.longitude) return;
+    const r = rScale(d.lotPerPriceMperAcre || 0);
+    const circle = L.circleMarker([d.latitude, d.longitude], {
+      radius: r,
+      fillColor: '#3d7a4f',
+      fillOpacity: 0.72,
+      color: '#f5f2eb',
+      weight: 1.5,
+      className: 'map-circle'
+    }).addTo(leafletMap);
+
+    circle._propId = d.id;
+
+    const popupHtml = `
+      <strong>${d.address}</strong>
+      <div>${d.city} · ${d.homeType}</div>
+      <div>Price: <b>$${fmt_money(d.price)}</b></div>
+      <div>Lot: ${d.lotAcres.toFixed(3)} acres</div>
+      <div>Beds/Baths: ${d.bedrooms ?? '—'} / ${d.bathrooms ?? '—'}</div>
+      <div>Days Listed: ${d.days_on_zillow ?? '—'}</div>
+      ${d.hdpUrl ? `<a href="${d.hdpUrl}" target="_blank" rel="noopener">View on Zillow ↗</a>` : ''}
+    `;
+    circle.bindPopup(popupHtml);
+
+    circle.on('mouseover', () => setHighlight(d.id));
+    circle.on('mouseout', () => setHighlight(null));
+    circle.on('click', () => {
+      setHighlight(d.id, true);
+      scrollToRow(d.id);
+    });
+
+    leafletMarkers.push(circle);
+  });
+}
+
+// ── HIGHLIGHT ──────────────────────────────────────────────────────
+let stickyHighlight = null;
+
+function setHighlight(id, sticky = false) {
+  if (sticky) {
+    stickyHighlight = stickyHighlight === id ? null : id;
+  }
+  const active = sticky ? stickyHighlight : (id ?? stickyHighlight);
+  highlighted = active;
+
+  // table
+  document.querySelectorAll('#table-body tr').forEach(tr => {
+    tr.classList.toggle('highlighted', +tr.dataset.id === active);
+  });
+
+  // scatter
+  if (scatterSvg) {
+    scatterSvg.selectAll('.dot')
+      .classed('highlighted', d => d.id === active)
+      .classed('dimmed', d => active != null && d.id !== active);
+  }
+
+  // map
+  leafletMarkers.forEach(m => {
+    const isActive = m._propId === active;
+    m.setStyle({
+      fillColor: isActive ? '#b85c2a' : '#3d7a4f',
+      weight: isActive ? 3 : 1.5,
+      color: isActive ? '#0f0e0b' : '#f5f2eb',
+    });
+    if (isActive) m.bringToFront();
+  });
+}
+
+// ── TOOLTIP ────────────────────────────────────────────────────────
+const tooltip = document.getElementById('tooltip');
+function showTooltip(event, d) {
+  tooltip.innerHTML = `<strong>${d.address}</strong>
+Price: $${fmt_money(d.price)}<br>
+Lot: ${d.lotAcres.toFixed(3)} ac · ${d.lotSqFt.toLocaleString()} sqft<br>
+Lot/Price: ${d.lotPerPriceMperAcre ? d.lotPerPriceMperAcre.toFixed(3)+' ac/$M' : '—'}<br>
+${d.bedrooms ?? '—'} bed · ${d.bathrooms ?? '—'} bath`;
+  tooltip.style.display = 'block';
+  moveTooltip(event);
+}
+function moveTooltip(event) {
+  tooltip.style.left = (event.clientX + 16) + 'px';
+  tooltip.style.top  = (event.clientY - 10) + 'px';
+}
+function hideTooltip() { tooltip.style.display = 'none'; }
+
+// ── AUTO-LOAD if file was pre-embedded ─────────────────────────────
+// (no-op in pure upload mode)
+
+// ── RESIZE ────────────────────────────────────────────────────────
+window.addEventListener('resize', () => {
+  if (allData.length) renderScatter();
+});
+</script>
+</body>
+</html>
