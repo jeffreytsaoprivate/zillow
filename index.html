@@ -85,6 +85,52 @@
     font-size: 12px;
     color: var(--muted);
   }
+  #firebase-btn {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 8px 18px;
+    border: 1.5px solid var(--accent2);
+    background: var(--paper);
+    color: var(--accent2);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  #firebase-btn:hover { background: var(--accent2); color: var(--paper); }
+  #firebase-btn:disabled { opacity: 0.5; cursor: default; background: var(--paper); color: var(--accent2); }
+
+  /* ── FILTER BAR ── */
+  .filter-bar {
+    display: none;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 48px;
+    border-bottom: 1px solid var(--rule);
+    background: var(--paper);
+  }
+  .filter-bar.visible { display: flex; }
+  .filter-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  #update-date-select {
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 5px 10px;
+    border: 1.5px solid var(--ink);
+    background: var(--cream);
+    color: var(--ink);
+  }
+  #firebase-status {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+  }
 
   /* ── UPLOAD SCREEN ── */
   #upload-screen {
@@ -403,6 +449,7 @@
   <div class="subtitle">Zillow · Market Intelligence</div>
   <div class="header-right">
     <span id="prop-count"></span>
+    <button id="firebase-btn" onclick="loadFromFirebase()">⇪ Load from Firebase</button>
     <button id="upload-btn" onclick="document.getElementById('file-input').click()">↑ Load JSON</button>
     <input type="file" id="file-input" accept=".json">
   </div>
@@ -417,7 +464,13 @@
   <button class="demo-btn" id="demo-btn">↗ Load embedded sample data</button>
 </div>
 
-<div id="dashboard">
+<div class="filter-bar" id="filter-bar">
+  <span class="filter-label">Update Date</span>
+  <select id="update-date-select" onchange="applyDateFilter()"></select>
+  <span id="firebase-status"></span>
+</div>
+
+<div id="dashboard" style="display:none;">
   <div class="stats-bar" id="stats-bar"></div>
   <div class="dash-grid">
     <!-- TABLE -->
@@ -545,8 +598,14 @@ function prepareData(raw) {
       longitude: d.longitude,
       hdpUrl: d.hdpUrl || null,
       description: d.description || '',
+      updateDate: d.updateDate || null,
     };
-  }).filter(d => d.price > 0 && d.latitude && d.longitude);
+  }).filter(d => d.price > 0);
+  // NOTE: previously also required d.latitude && d.longitude — relaxed
+  // because records loaded from Firebase don't carry coordinates, so the
+  // table/stats/scatter still populate for them. The map view already
+  // skips any individual marker missing lat/lng (see renderMap), so this
+  // only affects which records make it into allData at all.
 }
 
 function fmt_type(t) {
@@ -855,6 +914,147 @@ function hideTooltip() { tooltip.style.display = 'none'; }
 window.addEventListener('resize', () => {
   if (allData.length) renderScatter();
 });
+</script>
+
+<!-- ── FIREBASE (load, filter by updateDate, prune records older than 2 months) ── -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
+import {
+  getFirestore, collection, getDocs, doc, writeBatch,
+} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+
+// Same config as firebase.js — a Firebase web apiKey is meant to be public;
+// access is governed by Firestore security rules, not by keeping this secret.
+const firebaseConfig = {
+  apiKey: "AIzaSyA9k81iD2mzPuLKBl76d6sdcLWvguDBzcs",
+  authDomain: "kids-15b5a.firebaseapp.com",
+  projectId: "kids-15b5a",
+  storageBucket: "kids-15b5a.firebasestorage.app",
+  messagingSenderId: "350263998718",
+  appId: "1:350263998718:web:8c1d356caa2df0da99cdaf",
+  measurementId: "G-7CM04QF69W",
+};
+const COLLECTION_NAME = 'zillow'; // matches FIREBASE_COLLECTION in pull-and-save-zillow.js
+const MAX_AGE_MONTHS = 2;
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+let firebaseRawData = []; // full fetched set, each item tagged with its Firestore docId
+
+function collectionPath() {
+  return `artifacts/${firebaseConfig.appId}/public/data/${COLLECTION_NAME}`;
+}
+
+// Convert a Firestore zillow record into the raw shape prepareData() expects.
+function mapDocToRaw(docSnap) {
+  const d = docSnap.data();
+  return {
+    _docId: docSnap.id,
+    streetAddress: d.address ?? null,
+    city: d.city ?? null,
+    homeType: d.propertyType ?? null,
+    price: d.price ?? 0,
+    livingArea: d.homeSize ?? 0,
+    // stored as acres (see pull-and-save-zillow.js) — prepareData expects
+    // sqft and divides by 43560, so convert back here.
+    lotSize: (d.lotSize ?? 0) * 43560,
+    days_on_zillow: d.dayListed ?? null,
+    bedrooms: d.bedrooms ?? null,
+    bathrooms: d.bathrooms ?? null,
+    hdpUrl: d.zillowLink ?? null,
+    updateDate: d.updateDate ?? null,
+    latitude: d.latitude ?? null,
+    longitude: d.longitude ?? null,
+  };
+}
+
+function cutoffDate() {
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - MAX_AGE_MONTHS);
+  return cutoff;
+}
+
+function isStale(updateDateStr) {
+  if (!updateDateStr) return false; // no date on record — leave it alone
+  const d = new Date(updateDateStr);
+  if (isNaN(d)) return false;
+  return d < cutoffDate();
+}
+
+async function deleteStaleDocs(staleDocs) {
+  if (staleDocs.length === 0) return 0;
+  // Firestore batches cap at 500 writes — chunk just in case.
+  for (let i = 0; i < staleDocs.length; i += 450) {
+    const batch = writeBatch(db);
+    for (const d of staleDocs.slice(i, i + 450)) {
+      batch.delete(doc(db, collectionPath(), d._docId));
+    }
+    await batch.commit();
+  }
+  return staleDocs.length;
+}
+
+function populateDateDropdown(records) {
+  const dates = [...new Set(records.map(r => r.updateDate).filter(Boolean))]
+    .sort((a, b) => b.localeCompare(a)); // newest first
+  const select = document.getElementById('update-date-select');
+  select.innerHTML =
+    `<option value="__all__">All dates (${records.length})</option>` +
+    dates.map(dt => {
+      const count = records.filter(r => r.updateDate === dt).length;
+      return `<option value="${dt}">${dt} (${count})</option>`;
+    }).join('');
+  // Default to the most recent single date rather than everything at once.
+  if (dates.length) select.value = dates[0];
+}
+
+window.applyDateFilter = function applyDateFilter() {
+  const selected = document.getElementById('update-date-select').value;
+  const filtered = selected === '__all__'
+    ? firebaseRawData
+    : firebaseRawData.filter(r => r.updateDate === selected);
+  initDashboard(filtered);
+  document.getElementById('filter-bar').classList.add('visible');
+};
+
+window.loadFromFirebase = async function loadFromFirebase() {
+  const btn = document.getElementById('firebase-btn');
+  const status = document.getElementById('firebase-status');
+  btn.disabled = true;
+  status.textContent = 'Connecting…';
+
+  try {
+    await signInAnonymously(auth);
+
+    status.textContent = 'Fetching listings…';
+    const snap = await getDocs(collection(db, collectionPath()));
+    const allDocs = snap.docs.map(mapDocToRaw);
+
+    status.textContent = 'Checking for old records…';
+    const stale = allDocs.filter(r => isStale(r.updateDate));
+    const deletedCount = await deleteStaleDocs(stale);
+    const fresh = allDocs.filter(r => !isStale(r.updateDate));
+
+    firebaseRawData = fresh;
+    populateDateDropdown(fresh);
+
+    document.getElementById('upload-screen').style.display = 'none';
+    document.getElementById('filter-bar').classList.add('visible');
+    applyDateFilter();
+
+    status.textContent = deletedCount > 0
+      ? `Loaded ${fresh.length} listings · removed ${deletedCount} older than ${MAX_AGE_MONTHS} months`
+      : `Loaded ${fresh.length} listings`;
+  } catch (err) {
+    console.error(err);
+    status.textContent = 'Error loading from Firebase — see console.';
+  } finally {
+    btn.disabled = false;
+  }
+};
 </script>
 </body>
 </html>
