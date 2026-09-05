@@ -295,6 +295,24 @@
     white-space: nowrap;
   }
   tbody td.addr { font-weight: 600; }
+  .badge {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 2px;
+    color: var(--paper);
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  .badge-new { background: var(--accent3); }
+  .badge-changed { background: var(--accent); }
+  .price-delta { font-size: 10px; font-family: var(--mono); margin-left: 6px; }
+  .price-delta.up { color: #b03a2e; }
+  .price-delta.down { color: var(--accent3); }
   tbody td.num {
     font-family: var(--mono);
     font-size: 12px;
@@ -530,7 +548,9 @@
 
 <div id="tooltip"></div>
 
-<!-- Leaflet -->
+<!-- Leaflet, tiled with plain OpenStreetMap (Carto's free anonymous tile
+     tier now requires an API key — swap the tileLayer URL below for
+     Carto's if you have a key) -->
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 
@@ -538,8 +558,8 @@
 // ── STATE ──────────────────────────────────────────────────────────
 let allData = [];
 let highlighted = null;
-let sortCol = 'price';
-let sortDir = 1;
+let sortCol = 'pricePerAcre'; // $/Acre
+let sortDir = 1; // ascending
 let leafletMap, leafletMarkers = [];
 
 // ── FILE UPLOAD ────────────────────────────────────────────────────
@@ -599,6 +619,8 @@ function prepareData(raw) {
       hdpUrl: d.hdpUrl || null,
       description: d.description || '',
       updateDate: d.updateDate || null,
+      changeStatus: d.changeStatus || null,
+      priceChange: d.priceChange ?? null,
     };
   }).filter(d => d.price > 0);
   // NOTE: previously also required d.latitude && d.longitude — relaxed
@@ -656,6 +678,22 @@ function fmt_money(v) {
 }
 
 // ── TABLE ──────────────────────────────────────────────────────────
+function statusBadgeHtml(d) {
+  if (d.changeStatus === 'new') return `<span class="badge badge-new">New</span>`;
+  if (d.changeStatus === 'changed') return `<span class="badge badge-changed">Updated</span>`;
+  return '';
+}
+
+function priceCellHtml(d) {
+  const base = `$${fmt_money(d.price)}`;
+  if (d.changeStatus === 'changed' && d.priceChange) {
+    const up = d.priceChange > 0;
+    const arrow = up ? '▲' : '▼';
+    return `${base}<span class="price-delta ${up ? 'up' : 'down'}">${arrow} $${fmt_money(Math.abs(d.priceChange))}</span>`;
+  }
+  return base;
+}
+
 function renderTable() {
   const sorted = [...allData].sort((a,b) => {
     const va = a[sortCol], vb = b[sortCol];
@@ -666,10 +704,10 @@ function renderTable() {
   const tbody = document.getElementById('table-body');
   tbody.innerHTML = sorted.map(d => `
     <tr data-id="${d.id}" class="${highlighted === d.id ? 'highlighted' : ''}">
-      <td class="addr">${d.address}</td>
+      <td class="addr">${statusBadgeHtml(d)}${d.address}</td>
       <td>${d.city}</td>
       <td>${d.homeType}</td>
-      <td class="num">$${fmt_money(d.price)}</td>
+      <td class="num">${priceCellHtml(d)}</td>
       <td class="num">${d.livingArea ? d.livingArea.toLocaleString()+' sqft' : '—'}</td>
       <td class="num">${d.lotAcres > 0 ? d.lotAcres.toFixed(3) : '—'}</td>
       <td class="num">${d.pricePerAcre ? '$'+fmt_money(d.pricePerAcre) : '—'}</td>
@@ -811,9 +849,9 @@ function renderMap() {
 
   leafletMap = L.map('map', { zoomControl: true, attributionControl: false }).setView(center, 13);
 
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-    attribution: '© CartoDB',
-    subdomains: 'abcd', maxZoom: 19
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors',
+    subdomains: 'abc', maxZoom: 19
   }).addTo(leafletMap);
 
   const rScale = d3.scaleSqrt()
@@ -823,18 +861,34 @@ function renderMap() {
   allData.forEach(d => {
     if (!d.latitude || !d.longitude) return;
     const r = rScale(d.lotPerPriceMperAcre || 0);
+    // Same color scale the scatter plot uses (by lotPerPriceMperAcre), so a
+    // property's dot and its map circle are always the same color.
+    const fill = colorScale(d.lotPerPriceMperAcre || 0);
+    const isFlagged = d.changeStatus === 'new' || d.changeStatus === 'changed';
+    const strokeColor = isFlagged ? '#f0c040' : '#f5f2eb'; // highlight-gold ring for new/changed
+    const baseWeight = isFlagged ? 3 : 1.5;
     const circle = L.circleMarker([d.latitude, d.longitude], {
       radius: r,
-      fillColor: '#3d7a4f',
-      fillOpacity: 0.72,
-      color: '#f5f2eb',
-      weight: 1.5,
+      fillColor: fill,
+      fillOpacity: 0.78,
+      color: strokeColor,
+      weight: baseWeight,
       className: 'map-circle'
     }).addTo(leafletMap);
 
     circle._propId = d.id;
+    circle._fillColor = fill; // reused in setHighlight so fill never changes
+    circle._strokeColor = strokeColor;
+    circle._baseWeight = baseWeight;
+
+    const badgeLine = d.changeStatus === 'new'
+      ? `<div><span class="badge badge-new">New</span></div>`
+      : d.changeStatus === 'changed'
+        ? `<div><span class="badge badge-changed">Updated</span>${d.priceChange ? ` <span class="price-delta ${d.priceChange > 0 ? 'up' : 'down'}">${d.priceChange > 0 ? '▲' : '▼'} $${fmt_money(Math.abs(d.priceChange))}</span>` : ''}</div>`
+        : '';
 
     const popupHtml = `
+      ${badgeLine}
       <strong>${d.address}</strong>
       <div>${d.city} · ${d.homeType}</div>
       <div>Price: <b>$${fmt_money(d.price)}</b></div>
@@ -882,9 +936,9 @@ function setHighlight(id, sticky = false) {
   leafletMarkers.forEach(m => {
     const isActive = m._propId === active;
     m.setStyle({
-      fillColor: isActive ? '#b85c2a' : '#3d7a4f',
-      weight: isActive ? 3 : 1.5,
-      color: isActive ? '#0f0e0b' : '#f5f2eb',
+      fillColor: m._fillColor, // always matches the scatter dot's color
+      weight: isActive ? 3 : m._baseWeight,
+      color: isActive ? '#0f0e0b' : m._strokeColor,
     });
     if (isActive) m.bringToFront();
   });
@@ -968,6 +1022,8 @@ function mapDocToRaw(docSnap) {
     updateDate: d.updateDate ?? null,
     latitude: d.latitude ?? null,
     longitude: d.longitude ?? null,
+    changeStatus: d.changeStatus ?? null, // 'new' | 'changed' | 'unchanged'
+    priceChange: d.priceChange ?? null,
   };
 }
 
@@ -1050,13 +1106,18 @@ window.loadFromFirebase = async function loadFromFirebase() {
       : `Loaded ${fresh.length} listings`;
   } catch (err) {
     console.error(err);
-    status.textContent = 'Error loading from Firebase — see console.';
+    status.textContent = 'Error loading from Firebase — see console. You can still load a JSON file manually below.';
   } finally {
     btn.disabled = false;
   }
 };
-loadFromFirebase();
 
+// Default behavior: load from Firebase automatically on page open.
+// Module scripts run after the DOM is parsed, so all elements referenced
+// above already exist. If this fails (offline, no auth, etc.), the catch
+// block above leaves the manual "Load JSON" upload screen in place as a
+// fallback — it's visible by default and only gets hidden on success.
+loadFromFirebase();
 </script>
 </body>
 </html>
