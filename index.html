@@ -275,6 +275,7 @@
     user-select: none;
   }
   thead th:hover { background: var(--accent); }
+  thead th.num { text-align: right; }
   thead th .sort-arrow { margin-left: 4px; opacity: 0.5; }
   thead th.sorted .sort-arrow { opacity: 1; color: var(--highlight); }
   tbody tr {
@@ -310,6 +311,7 @@
   }
   .badge-new { background: var(--accent3); }
   .badge-changed { background: var(--accent); }
+  .comment-icon { margin-right: 6px; font-size: 12px; vertical-align: middle; }
   .price-delta { font-size: 10px; font-family: var(--mono); margin-left: 6px; }
   .price-delta.up { color: #b03a2e; }
   .price-delta.down { color: var(--accent3); }
@@ -504,13 +506,13 @@
             <th data-col="address">Address <span class="sort-arrow">↕</span></th>
             <th data-col="city">City <span class="sort-arrow">↕</span></th>
             <th data-col="homeType">Type <span class="sort-arrow">↕</span></th>
-            <th data-col="price">Price <span class="sort-arrow">↕</span></th>
-            <th data-col="livingArea">Home Size <span class="sort-arrow">↕</span></th>
-            <th data-col="lotAcres">Lot (acres) <span class="sort-arrow">↕</span></th>
-            <th data-col="pricePerAcre">$/Acre <span class="sort-arrow">↕</span></th>
-            <th data-col="days_on_zillow">Days Listed <span class="sort-arrow">↕</span></th>
-            <th data-col="bedrooms">Beds <span class="sort-arrow">↕</span></th>
-            <th data-col="bathrooms">Baths <span class="sort-arrow">↕</span></th>
+            <th class="num" data-col="price">Price <span class="sort-arrow">↕</span></th>
+            <th class="num" data-col="livingArea">Home Size <span class="sort-arrow">↕</span></th>
+            <th class="num" data-col="lotAcres">Lot (acres) <span class="sort-arrow">↕</span></th>
+            <th class="num" data-col="pricePerAcre">$/Acre <span class="sort-arrow">↕</span></th>
+            <th class="num" data-col="days_on_zillow">Days Listed <span class="sort-arrow">↕</span></th>
+            <th class="num" data-col="bedrooms">Beds <span class="sort-arrow">↕</span></th>
+            <th class="num" data-col="bathrooms">Baths <span class="sort-arrow">↕</span></th>
             <th>Link</th>
           </tr>
         </thead>
@@ -621,6 +623,7 @@ function prepareData(raw) {
       updateDate: d.updateDate || null,
       changeStatus: d.changeStatus || null,
       priceChange: d.priceChange ?? null,
+      comment: d.comment || '',
     };
   }).filter(d => d.price > 0);
   // NOTE: previously also required d.latitude && d.longitude — relaxed
@@ -678,10 +681,17 @@ function fmt_money(v) {
 }
 
 // ── TABLE ──────────────────────────────────────────────────────────
+// Matches the "comment" field written by pull-and-save-zillow.js.
+const COMMENT_ICONS = {
+  'new': '⭐',
+  'price decrease': '⬇️',
+  'price increase': '⬆️',
+  'changes': '⚠️',
+};
+
 function statusBadgeHtml(d) {
-  if (d.changeStatus === 'new') return `<span class="badge badge-new">New</span>`;
-  if (d.changeStatus === 'changed') return `<span class="badge badge-changed">Updated</span>`;
-  return '';
+  const icon = COMMENT_ICONS[d.comment];
+  return icon ? `<span class="comment-icon" title="${d.comment}">${icon}</span>` : '';
 }
 
 function priceCellHtml(d) {
@@ -1024,6 +1034,7 @@ function mapDocToRaw(docSnap) {
     longitude: d.longitude ?? null,
     changeStatus: d.changeStatus ?? null, // 'new' | 'changed' | 'unchanged'
     priceChange: d.priceChange ?? null,
+    comment: d.comment ?? null, // 'new' | 'price decrease' | 'price increase' | 'changes' | ''
   };
 }
 
