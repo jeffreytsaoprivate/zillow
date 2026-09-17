@@ -336,6 +336,7 @@
 
   /* ── SCATTER ── */
   .scatter-wrap {
+    position: relative;
     border-right: 1px solid var(--rule);
     padding: 0;
   }
@@ -343,6 +344,25 @@
     display: block;
     width: 100%;
   }
+  .zoom-bg { cursor: grab; }
+  .zoom-bg:active { cursor: grabbing; }
+  .reset-zoom-btn {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 5;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    border: 1px solid var(--rule);
+    background: var(--paper);
+    color: var(--muted);
+    cursor: pointer;
+    opacity: 0.9;
+  }
+  .reset-zoom-btn:hover { border-color: var(--accent); color: var(--accent); opacity: 1; }
   .axis-label {
     font-family: var(--mono);
     font-size: 10px;
@@ -524,10 +544,11 @@
     <div class="section-head">
       <span class="section-num">02</span>
       <span class="section-title">Price vs Lot Size</span>
-      <span class="section-note">Circle size = lot size ÷ price · color = $/acre</span>
+      <span class="section-note">Circle size = lot size ÷ price · color = $/acre · scroll to zoom, drag to pan</span>
     </div>
     <div class="viz-row">
       <div class="scatter-wrap">
+        <button id="scatter-reset-zoom" class="reset-zoom-btn" title="Reset zoom" onclick="resetScatterZoom()">⤾ Reset</button>
         <svg id="scatter-svg"></svg>
       </div>
       <div class="map-wrap">
@@ -563,6 +584,14 @@ let highlighted = null;
 let sortCol = 'pricePerAcre'; // $/Acre
 let sortDir = 1; // ascending
 let leafletMap, leafletMarkers = [];
+let scatterZoom = null;       // the d3.zoom() behavior for the scatter plot
+let scatterZoomTarget = null; // the <g> it's attached to (for resetting)
+
+window.resetScatterZoom = function resetScatterZoom() {
+  if (scatterZoom && scatterZoomTarget) {
+    scatterZoomTarget.transition().duration(300).call(scatterZoom.transform, d3.zoomIdentity);
+  }
+};
 
 // ── FILE UPLOAD ────────────────────────────────────────────────────
 const fileInput = document.getElementById('file-input');
@@ -784,21 +813,35 @@ function renderScatter() {
   const cExt = d3.extent(data, d => d.lotPerPriceMperAcre || 0);
   colorScale.domain(cExt);
 
+  // clip so zoomed/panned dots never spill outside the plot area
+  svg.append('defs').append('clipPath')
+    .attr('id', 'scatter-clip')
+    .append('rect')
+    .attr('width', iW)
+    .attr('height', iH);
+
   const g = svg.append('g').attr('transform', `translate(${M.left},${M.top})`);
 
+  // transparent full-area rect so wheel/drag are captured everywhere in the
+  // plot (not just over gridlines/dots) — this is what makes the whole
+  // chart pannable/zoomable, not just the dots themselves.
+  g.append('rect').attr('class', 'zoom-bg')
+    .attr('width', iW).attr('height', iH)
+    .attr('fill', 'transparent');
+
   // grid
-  g.append('g').attr('class','grid')
-    .call(d3.axisLeft(yScale).tickSize(-iW).tickFormat(''))
-    .select('.domain').remove();
-  g.append('g').attr('class','grid')
+  const gridY = g.append('g').attr('class','grid')
+    .call(d3.axisLeft(yScale).tickSize(-iW).tickFormat(''));
+  gridY.select('.domain').remove();
+  const gridX = g.append('g').attr('class','grid')
     .attr('transform',`translate(0,${iH})`)
-    .call(d3.axisBottom(xScale).tickSize(-iH).tickFormat(''))
-    .select('.domain').remove();
+    .call(d3.axisBottom(xScale).tickSize(-iH).tickFormat(''));
+  gridX.select('.domain').remove();
 
   // axes
-  g.append('g').attr('transform',`translate(0,${iH})`)
+  const xAxis = g.append('g').attr('transform',`translate(0,${iH})`)
     .call(d3.axisBottom(xScale).ticks(6).tickFormat(d => d.toFixed(2)+' ac'));
-  g.append('g')
+  const yAxis = g.append('g')
     .call(d3.axisLeft(yScale).ticks(6).tickFormat(d => '$'+fmt_money(d)));
 
   // axis labels
@@ -810,12 +853,14 @@ function renderScatter() {
     .attr('x', -iH/2).attr('y', -54).attr('text-anchor','middle')
     .text('Price (USD)');
 
-  // dots
+  // dots (clipped, and grouped separately so zoom can reposition them)
   const rScale = d3.scaleSqrt()
     .domain([0, d3.max(data, d => d.lotPerPriceMperAcre || 0)])
     .range([4, 16]);
 
-  g.selectAll('.dot').data(data).enter().append('circle')
+  const dotsG = g.append('g').attr('class', 'dots-layer').attr('clip-path', 'url(#scatter-clip)');
+
+  dotsG.selectAll('.dot').data(data).enter().append('circle')
     .attr('class','dot')
     .attr('data-id', d => d.id)
     .attr('cx', d => xScale(d.lotAcres))
@@ -829,6 +874,39 @@ function renderScatter() {
     .on('mousemove', function(event, d) { moveTooltip(event); })
     .on('mouseleave', function() { setHighlight(null); hideTooltip(); })
     .on('click', function(event, d) { setHighlight(d.id, true); scrollToRow(d.id); });
+
+  // scroll-to-zoom / drag-to-pan — lets you zoom into the dense lower-left
+  // cluster of small-lot/low-price entries. Wheel always zooms; a drag only
+  // pans (rather than fighting the dots' own click/hover handlers) when it
+  // doesn't start on a dot.
+  const zoom = d3.zoom()
+    .scaleExtent([1, 25])
+    .extent([[0, 0], [iW, iH]])
+    .translateExtent([[0, 0], [iW, iH]])
+    .filter((event) => {
+      if (event.type === 'wheel') return true;
+      return !(event.target && event.target.classList && event.target.classList.contains('dot'));
+    })
+    .on('zoom', (event) => {
+      const zx = event.transform.rescaleX(xScale);
+      const zy = event.transform.rescaleY(yScale);
+
+      gridY.call(d3.axisLeft(zy).tickSize(-iW).tickFormat(''));
+      gridY.select('.domain').remove();
+      gridX.call(d3.axisBottom(zx).tickSize(-iH).tickFormat(''));
+      gridX.select('.domain').remove();
+
+      xAxis.call(d3.axisBottom(zx).ticks(6).tickFormat(d => d.toFixed(2)+' ac'));
+      yAxis.call(d3.axisLeft(zy).ticks(6).tickFormat(d => '$'+fmt_money(d)));
+
+      dotsG.selectAll('.dot')
+        .attr('cx', d => zx(d.lotAcres))
+        .attr('cy', d => zy(d.price));
+    });
+
+  g.call(zoom).on('dblclick.zoom', null);
+  scatterZoom = zoom;
+  scatterZoomTarget = g;
 
   // colorbar legend
   const defs = svg.append('defs');
