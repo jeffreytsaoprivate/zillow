@@ -327,6 +327,36 @@
   }
   tbody td a:hover { text-decoration: underline; }
 
+  /* ── NOTES ── */
+  tbody td.notes-cell { white-space: normal; min-width: 240px; padding: 4px 10px; }
+  .note-wrap { position: relative; }
+  .note-input {
+    width: 100%;
+    min-height: 28px;
+    resize: vertical;
+    font-family: var(--sans);
+    font-size: 12px;
+    line-height: 1.4;
+    padding: 4px 8px;
+    border: 1px solid var(--rule);
+    background: var(--paper);
+    color: var(--ink);
+    cursor: text;
+  }
+  .note-input:focus { outline: none; border-color: var(--accent2); background: #fff; }
+  .note-input.has-note { border-color: var(--accent3); background: rgba(61,122,79,0.06); }
+  .note-status {
+    position: absolute;
+    right: 6px;
+    bottom: 4px;
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--muted);
+    pointer-events: none;
+  }
+  .note-status.ok { color: var(--accent3); }
+  .note-status.err { color: #b03a2e; }
+
   /* ── VIZ ROW ── */
   .viz-row {
     display: grid;
@@ -534,6 +564,7 @@
             <th class="num" data-col="bedrooms">Beds <span class="sort-arrow">↕</span></th>
             <th class="num" data-col="bathrooms">Baths <span class="sort-arrow">↕</span></th>
             <th>Link</th>
+            <th data-col="note">Notes <span class="sort-arrow">↕</span></th>
           </tr>
         </thead>
         <tbody id="table-body"></tbody>
@@ -653,6 +684,7 @@ function prepareData(raw) {
       changeStatus: d.changeStatus || null,
       priceChange: d.priceChange ?? null,
       comment: d.comment || '',
+      noteKey: noteKeyFor(d.hdpUrl, addr, city),
     };
   }).filter(d => d.price > 0);
   // NOTE: previously also required d.latitude && d.longitude — relaxed
@@ -662,6 +694,70 @@ function prepareData(raw) {
   // only affects which records make it into allData at all.
 }
 
+// ── NOTES (user comments) ──────────────────────────────────────────
+// Notes live in their own Firestore collection (zillow_notes), keyed by a
+// stable property id rather than the listing doc id. Listing docs are
+// per-updateDate snapshots and get pruned after 2 months, so keying by
+// property means a note follows the house across every pull and survives
+// pruning. Key = Zillow zpid when the URL has one, else address|city.
+const notesMap = {};          // noteKey -> note text
+window.notesMap = notesMap;
+const noteSaveTimers = {};
+
+function noteKeyFor(hdpUrl, addr, city) {
+  const m = hdpUrl && String(hdpUrl).match(/(\d+)_zpid/);
+  if (m) return 'zpid_' + m[1];
+  const raw = `${addr || ''}|${city || ''}`.toLowerCase().trim();
+  // Firestore doc ids can't contain '/'
+  return 'addr_' + raw.replace(/[\/\s]+/g, '_').replace(/[^a-z0-9_|.-]/g, '');
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+}
+
+function setNoteStatus(key, text, cls) {
+  document.querySelectorAll(`.note-status[data-key="${key}"]`).forEach(el => {
+    el.textContent = text;
+    el.className = 'note-status' + (cls ? ' ' + cls : '');
+  });
+}
+
+function queueNoteSave(d, text, immediate = false) {
+  notesMap[d.noteKey] = text;
+  clearTimeout(noteSaveTimers[d.noteKey]);
+  setNoteStatus(d.noteKey, 'editing…');
+  const run = async () => {
+    delete noteSaveTimers[d.noteKey];
+    if (typeof window.saveNoteToFirebase !== 'function') {
+      setNoteStatus(d.noteKey, 'not saved (offline)', 'err');
+      return;
+    }
+    setNoteStatus(d.noteKey, 'saving…');
+    try {
+      await window.saveNoteToFirebase(d.noteKey, text, { address: d.address, city: d.city, hdpUrl: d.hdpUrl });
+      if (notesMap[d.noteKey] === text) {
+        setNoteStatus(d.noteKey, 'saved', 'ok');
+        setTimeout(() => setNoteStatus(d.noteKey, ''), 1500);
+      }
+    } catch (err) {
+      console.error('Note save failed', err);
+      setNoteStatus(d.noteKey, 'save failed', 'err');
+    }
+  };
+  if (immediate) run(); else noteSaveTimers[d.noteKey] = setTimeout(run, 800);
+}
+
+// Called by the Firebase module once notes are fetched.
+window.applyLoadedNotes = function applyLoadedNotes(map) {
+  Object.assign(notesMap, map);
+  if (allData.length) {
+    allData.forEach(d => { d.note = notesMap[d.noteKey] || ''; });
+    renderTable();
+  }
+};
+
 function fmt_type(t) {
   if (!t) return '—';
   return t.replace(/_/g,' ').replace(/\b\w/g, c => c.toUpperCase());
@@ -670,6 +766,7 @@ function fmt_type(t) {
 // ── INIT ───────────────────────────────────────────────────────────
 function initDashboard(raw) {
   allData = prepareData(raw);
+  allData.forEach(d => { d.note = notesMap[d.noteKey] || ''; });
   document.getElementById('upload-screen').style.display = 'none';
   document.getElementById('dashboard').style.display = 'block';
   document.getElementById('prop-count').textContent = allData.length + ' listings';
@@ -736,7 +833,10 @@ function priceCellHtml(d) {
 function renderTable() {
   const sorted = [...allData].sort((a,b) => {
     const va = a[sortCol], vb = b[sortCol];
-    if (va == null) return 1; if (vb == null) return -1;
+    const emptyA = va == null || va === '', emptyB = vb == null || vb === '';
+    if (emptyA && emptyB) return 0;
+    if (emptyA) return 1; if (emptyB) return -1;
+    if (typeof va === 'string') return sortDir * va.localeCompare(vb);
     return sortDir * (va < vb ? -1 : va > vb ? 1 : 0);
   });
 
@@ -754,6 +854,13 @@ function renderTable() {
       <td class="num">${d.bedrooms ?? '—'}</td>
       <td class="num">${d.bathrooms ?? '—'}</td>
       <td>${d.hdpUrl ? `<a href="${d.hdpUrl}" target="_blank" rel="noopener">Zillow ↗</a>` : '—'}</td>
+      <td class="notes-cell">
+        <div class="note-wrap">
+          <textarea class="note-input${d.note ? ' has-note' : ''}" rows="1" data-id="${d.id}"
+            placeholder="Add a note…">${escapeHtml(d.note)}</textarea>
+          <span class="note-status" data-key="${d.noteKey}"></span>
+        </div>
+      </td>
     </tr>`).join('');
 
   // row events
@@ -761,6 +868,25 @@ function renderTable() {
     tr.addEventListener('mouseenter', () => setHighlight(+tr.dataset.id));
     tr.addEventListener('mouseleave', () => setHighlight(null));
     tr.addEventListener('click', () => setHighlight(+tr.dataset.id, true));
+  });
+
+  // note boxes — clicks/typing inside shouldn't toggle the row highlight
+  const byId = new Map(allData.map(d => [d.id, d]));
+  tbody.querySelectorAll('.note-input').forEach(ta => {
+    const d = byId.get(+ta.dataset.id);
+    ta.addEventListener('click', e => e.stopPropagation());
+    ta.addEventListener('input', () => {
+      d.note = ta.value;
+      ta.classList.toggle('has-note', !!ta.value.trim());
+      queueNoteSave(d, ta.value);
+    });
+    ta.addEventListener('blur', () => {
+      if (noteSaveTimers[d.noteKey]) {
+        clearTimeout(noteSaveTimers[d.noteKey]);
+        delete noteSaveTimers[d.noteKey];
+        queueNoteSave(d, ta.value, true);
+      }
+    });
   });
 
   // sort headers
@@ -975,7 +1101,8 @@ function renderMap() {
         ? `<div><span class="badge badge-changed">Updated</span>${d.priceChange ? ` <span class="price-delta ${d.priceChange > 0 ? 'up' : 'down'}">${d.priceChange > 0 ? '▲' : '▼'} $${fmt_money(Math.abs(d.priceChange))}</span>` : ''}</div>`
         : '';
 
-    const popupHtml = `
+    // function form so the popup always shows the latest note text
+    const popupHtml = () => `
       ${badgeLine}
       <strong>${d.address}</strong>
       <div>${d.city} · ${d.homeType}</div>
@@ -983,6 +1110,7 @@ function renderMap() {
       <div>Lot: ${d.lotAcres.toFixed(3)} acres</div>
       <div>Beds/Baths: ${d.bedrooms ?? '—'} / ${d.bathrooms ?? '—'}</div>
       <div>Days Listed: ${d.days_on_zillow ?? '—'}</div>
+      ${d.note ? `<div style="color:#7ecbf5; white-space:pre-wrap; max-width:240px;">✎ ${escapeHtml(d.note)}</div>` : ''}
       ${d.hdpUrl ? `<a href="${d.hdpUrl}" target="_blank" rel="noopener">View on Zillow ↗</a>` : ''}
     `;
     circle.bindPopup(popupHtml);
@@ -1039,7 +1167,7 @@ function showTooltip(event, d) {
 Price: $${fmt_money(d.price)}<br>
 Lot: ${d.lotAcres.toFixed(3)} ac · ${d.lotSqFt.toLocaleString()} sqft<br>
 Lot/Price: ${d.lotPerPriceMperAcre ? d.lotPerPriceMperAcre.toFixed(3)+' ac/$M' : '—'}<br>
-${d.bedrooms ?? '—'} bed · ${d.bathrooms ?? '—'} bath`;
+${d.bedrooms ?? '—'} bed · ${d.bathrooms ?? '—'} bath${d.note ? `<br><span style="color:#7ecbf5">✎ ${escapeHtml(d.note)}</span>` : ''}`;
   tooltip.style.display = 'block';
   moveTooltip(event);
 }
@@ -1063,7 +1191,7 @@ window.addEventListener('resize', () => {
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
 import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import {
-  getFirestore, collection, getDocs, doc, writeBatch,
+  getFirestore, collection, getDocs, doc, writeBatch, setDoc, deleteDoc, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 
 // Same config as firebase.js — a Firebase web apiKey is meant to be public;
@@ -1089,6 +1217,44 @@ let firebaseRawData = []; // full fetched set, each item tagged with its Firesto
 function collectionPath() {
   return `artifacts/${firebaseConfig.appId}/public/data/${COLLECTION_NAME}`;
 }
+
+// ── NOTES ──
+// Separate collection so notes are never touched by the pull script or
+// by the 2-month stale-record pruning below.
+const NOTES_COLLECTION_NAME = 'zillow_notes';
+function notesPath() {
+  return `artifacts/${firebaseConfig.appId}/public/data/${NOTES_COLLECTION_NAME}`;
+}
+
+let authReady = null;
+function ensureAuth() {
+  if (!authReady) authReady = signInAnonymously(auth).catch(err => { authReady = null; throw err; });
+  return authReady;
+}
+
+async function loadNotes() {
+  await ensureAuth();
+  const snap = await getDocs(collection(db, notesPath()));
+  const map = {};
+  snap.docs.forEach(s => { map[s.id] = s.data().note || ''; });
+  return map;
+}
+
+window.saveNoteToFirebase = async function saveNoteToFirebase(key, text, meta = {}) {
+  await ensureAuth();
+  const ref = doc(db, notesPath(), key);
+  if (!text.trim()) {
+    await deleteDoc(ref); // clearing the box removes the note
+    return;
+  }
+  await setDoc(ref, {
+    note: text,
+    address: meta.address ?? null,
+    city: meta.city ?? null,
+    zillowLink: meta.hdpUrl ?? null,
+    updatedAt: serverTimestamp(),
+  });
+};
 
 // Convert a Firestore zillow record into the raw shape prepareData() expects.
 function mapDocToRaw(docSnap) {
@@ -1172,10 +1338,14 @@ window.loadFromFirebase = async function loadFromFirebase() {
   status.textContent = 'Connecting…';
 
   try {
-    await signInAnonymously(auth);
+    await ensureAuth();
 
     status.textContent = 'Fetching listings…';
-    const snap = await getDocs(collection(db, collectionPath()));
+    const [snap, notes] = await Promise.all([
+      getDocs(collection(db, collectionPath())),
+      loadNotes().catch(err => { console.error('Notes load failed', err); return {}; }),
+    ]);
+    Object.assign(window.notesMap, notes);
     const allDocs = snap.docs.map(mapDocToRaw);
 
     status.textContent = 'Checking for old records…';
