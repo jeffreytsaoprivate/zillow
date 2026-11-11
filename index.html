@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Newton/Brookline MA · Property Intelligence</title>
+<title>Property Intelligence</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
 <style>
@@ -125,6 +125,59 @@
     background: var(--cream);
     color: var(--ink);
   }
+  #search-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .search-chip {
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 4px 10px;
+    border: 1.5px solid var(--rule);
+    background: var(--paper);
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.12s;
+  }
+  .search-chip:hover { border-color: var(--accent2); color: var(--accent2); }
+  .search-chip.on { background: var(--accent2); border-color: var(--accent2); color: var(--paper); }
+  .search-chip .cnt { opacity: 0.7; margin-left: 4px; }
+  .filter-sep { width: 1px; height: 20px; background: var(--rule); margin: 0 4px; }
+  .search-tag {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 9px;
+    padding: 1px 4px;
+    margin-left: 6px;
+    border: 1px solid var(--accent2);
+    color: var(--accent2);
+    vertical-align: middle;
+    font-weight: 500;
+  }
+  #edit-searches-link {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent2);
+    text-decoration: none;
+  }
+  #edit-searches-link:hover { text-decoration: underline; }
+
+  /* x-axis toggle on the scatter section */
+  .x-toggle { display: inline-flex; margin-left: 12px; }
+  .x-toggle button {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    border: 1.5px solid var(--ink);
+    background: var(--paper);
+    color: var(--ink);
+    cursor: pointer;
+  }
+  .x-toggle button + button { border-left: none; }
+  .x-toggle button.on { background: var(--ink); color: var(--paper); }
+  .x-toggle button:not(.on):hover { background: var(--cream); }
+
   #firebase-status {
     margin-left: auto;
     font-family: var(--mono);
@@ -519,6 +572,7 @@
   <div class="subtitle">Zillow · Market Intelligence</div>
   <div class="header-right">
     <span id="prop-count"></span>
+    <a id="edit-searches-link" href="zillow-searches.html" target="_blank" rel="noopener">✎ Edit searches</a>
     <button id="firebase-btn" onclick="loadFromFirebase()">⇪ Load from Firebase</button>
     <button id="upload-btn" onclick="document.getElementById('file-input').click()">↑ Load JSON</button>
     <input type="file" id="file-input" accept=".json">
@@ -535,8 +589,11 @@
 </div>
 
 <div class="filter-bar" id="filter-bar">
+  <span class="filter-label">Searches</span>
+  <div id="search-chips"></div>
+  <span class="filter-sep"></span>
   <span class="filter-label">Update Date</span>
-  <select id="update-date-select" onchange="applyDateFilter()"></select>
+  <select id="update-date-select" onchange="applyFilters()"></select>
   <span id="firebase-status"></span>
 </div>
 
@@ -560,6 +617,7 @@
             <th class="num" data-col="livingArea">Home Size <span class="sort-arrow">↕</span></th>
             <th class="num" data-col="lotAcres">Lot (acres) <span class="sort-arrow">↕</span></th>
             <th class="num" data-col="pricePerAcre">$/Acre <span class="sort-arrow">↕</span></th>
+            <th class="num" data-col="pricePerSqft">$/Sq Ft <span class="sort-arrow">↕</span></th>
             <th class="num" data-col="days_on_zillow">Days Listed <span class="sort-arrow">↕</span></th>
             <th class="num" data-col="bedrooms">Beds <span class="sort-arrow">↕</span></th>
             <th class="num" data-col="bathrooms">Baths <span class="sort-arrow">↕</span></th>
@@ -574,8 +632,12 @@
     <!-- VIZ ROW -->
     <div class="section-head">
       <span class="section-num">02</span>
-      <span class="section-title">Price vs Lot Size</span>
-      <span class="section-note">Circle size = lot size ÷ price · color = $/acre · scroll to zoom, drag to pan</span>
+      <span class="section-title" id="scatter-title">Price vs Lot Size</span>
+      <span class="x-toggle" role="group" aria-label="X axis">
+        <button type="button" data-mode="lot" class="on" onclick="setXMode('lot')">Lot (acres)</button>
+        <button type="button" data-mode="home" onclick="setXMode('home')">Home (sq ft)</button>
+      </span>
+      <span class="section-note" id="scatter-note">Circle size &amp; color = acres per $1M · scroll to zoom, drag to pan</span>
     </div>
     <div class="viz-row">
       <div class="scatter-wrap">
@@ -586,14 +648,15 @@
         <div class="section-head" style="border-bottom:1px solid var(--rule); border-top:1px solid var(--rule);">
           <span class="section-num">03</span>
           <span class="section-title">Map View</span>
-          <span class="section-note">Circle = lot÷price · click for details</span>
+          <span class="section-note" id="map-note">Circle = lot÷price · click for details</span>
         </div>
         <div id="map"></div>
         <div class="legend" id="map-legend">
           <div class="legend-title">Circle size</div>
-          <div class="legend-row"><div class="legend-dot" style="width:8px;height:8px;"></div> Small lot/price</div>
+          <div class="legend-row"><div class="legend-dot" style="width:8px;height:8px;"></div> <span>Small <span class="legend-unit">lot</span>/price</span></div>
           <div class="legend-row"><div class="legend-dot" style="width:16px;height:16px;"></div> Medium</div>
-          <div class="legend-row"><div class="legend-dot" style="width:26px;height:26px;"></div> Large lot/price</div>
+          <div class="legend-row"><div class="legend-dot" style="width:26px;height:26px;"></div> <span>Large <span class="legend-unit">lot</span>/price</span></div>
+          <div class="legend-row legend-nodata" style="display:none;"><div class="legend-dot" style="width:8px;height:8px;background:#b8b2a6;"></div> No home size</div>
         </div>
       </div>
     </div>
@@ -617,6 +680,39 @@ let sortDir = 1; // ascending
 let leafletMap, leafletMarkers = [];
 let scatterZoom = null;       // the d3.zoom() behavior for the scatter plot
 let scatterZoomTarget = null; // the <g> it's attached to (for resetting)
+let xMode = 'lot';            // scatter x-axis: 'lot' (acres) | 'home' (sq ft)
+let showSearchTags = false;   // set by the Firebase module when >1 search is shown
+window.setShowSearchTags = v => { showSearchTags = !!v; };
+
+// Each x-axis mode defines what's plotted and what drives circle size/color
+// (x per $1M of price — "how much lot / house you get for the money").
+// has() guards every division: listings without the value are left out of
+// the scatter and drawn grey on the map instead of dividing by zero.
+const X_MODES = {
+  lot: {
+    title: 'Price vs Lot Size',
+    axisLabel: 'Lot Size (acres)',
+    x: d => d.lotAcres,
+    has: d => d.lotAcres > 0,
+    metric: d => d.lotPerPriceMperAcre,
+    metricUnit: 'ac/$M',
+    unitWord: 'lot',
+    tick: v => v.toFixed(2) + ' ac',
+    missingLabel: 'lot size',
+  },
+  home: {
+    title: 'Price vs Home Size',
+    axisLabel: 'Home Size (sq ft)',
+    x: d => d.livingArea,
+    has: d => d.livingArea > 0,
+    metric: d => d.sqftPerPriceM,
+    metricUnit: 'sqft/$M',
+    unitWord: 'home',
+    tick: v => d3.format(',.0f')(v),
+    missingLabel: 'home size',
+  },
+};
+const NO_DATA_FILL = '#b8b2a6';
 
 window.resetScatterZoom = function resetScatterZoom() {
   if (scatterZoom && scatterZoomTarget) {
@@ -659,20 +755,28 @@ function prepareData(raw) {
     const lotAcres = lotSqFt / 43560;
     const price = d.price || 0;
     const pricePerAcre = lotAcres > 0 ? price / lotAcres : null;
-    const lotPerPriceMperAcre = price > 0 ? (lotAcres / (price / 1e6)) : null;
+    const lotPerPriceMperAcre = price > 0 && lotAcres > 0 ? (lotAcres / (price / 1e6)) : null;
+    const livingArea = Number(d.livingArea || d.livingAreaValue) || 0;
+    const pricePerSqft = livingArea > 0 ? price / livingArea : null;
+    const sqftPerPriceM = price > 0 && livingArea > 0 ? livingArea / (price / 1e6) : null;
     const addr = d.streetAddress || (d.address && d.address.streetAddress) || 'Unknown';
     const city  = d.city || (d.address && d.address.city) || '';
+    // Records with no search tags predate search tagging → search #1.
+    const searches = Array.isArray(d.searches) && d.searches.length ? d.searches.map(Number) : [1];
     return {
       id: i,
       address: addr,
       city,
       homeType: fmt_type(d.homeType),
       price,
-      livingArea: d.livingArea || d.livingAreaValue || 0,
+      livingArea,
       lotSqFt,
       lotAcres,
       pricePerAcre,
+      pricePerSqft,
       lotPerPriceMperAcre,
+      sqftPerPriceM,
+      searches,
       days_on_zillow: d.days_on_zillow ?? null,
       bedrooms: d.bedrooms ?? null,
       bathrooms: d.bathrooms ?? null,
@@ -779,18 +883,23 @@ function initDashboard(raw) {
 
 // ── STATS ──────────────────────────────────────────────────────────
 function renderStats() {
+  // mean of the non-empty values; null when there are none (no ÷0 / NaN)
+  const avg = arr => arr.length ? arr.reduce((a,b) => a+b, 0) / arr.length : null;
   const prices = allData.map(d => d.price).filter(Boolean);
-  const avgPrice = prices.reduce((a,b) => a+b, 0) / prices.length;
-  const medPrice = [...prices].sort((a,b)=>a-b)[Math.floor(prices.length/2)];
-  const avgLot = allData.map(d=>d.lotAcres).filter(Boolean).reduce((a,b)=>a+b,0)/allData.length;
-  const avgDays = allData.map(d=>d.days_on_zillow).filter(v=>v!=null).reduce((a,b)=>a+b,0)/allData.filter(d=>d.days_on_zillow!=null).length;
+  const avgPrice = avg(prices);
+  const medPrice = prices.length ? [...prices].sort((a,b)=>a-b)[Math.floor(prices.length/2)] : null;
+  const avgLot = avg(allData.map(d=>d.lotAcres).filter(v => v > 0));
+  const avgPpsf = avg(allData.map(d=>d.pricePerSqft).filter(v => v != null));
+  const avgDays = avg(allData.map(d=>d.days_on_zillow).filter(v=>v!=null));
+  const show = (v, f) => v == null ? '—' : f(v);
 
   const stats = [
     { label:'Listings', value: allData.length },
-    { label:'Avg Price', value:'$'+fmt_money(avgPrice) },
-    { label:'Median Price', value:'$'+fmt_money(medPrice) },
-    { label:'Avg Lot Size', value: avgLot.toFixed(3)+' ac' },
-    { label:'Avg Days Listed', value: avgDays.toFixed(0)+' days' },
+    { label:'Avg Price', value: show(avgPrice, v => '$'+fmt_money(v)) },
+    { label:'Median Price', value: show(medPrice, v => '$'+fmt_money(v)) },
+    { label:'Avg Lot Size', value: show(avgLot, v => v.toFixed(3)+' ac') },
+    { label:'Avg $/Sq Ft', value: show(avgPpsf, fmt_ppsf) },
+    { label:'Avg Days Listed', value: show(avgDays, v => v.toFixed(0)+' days') },
   ];
   const bar = document.getElementById('stats-bar');
   bar.innerHTML = stats.map(s => `
@@ -805,6 +914,8 @@ function fmt_money(v) {
   if (v >= 1e3) return (v/1e3).toFixed(0)+'K';
   return Math.round(v);
 }
+// $/sq ft needs full precision ($1,240 not "$1K")
+function fmt_ppsf(v) { return '$' + Math.round(v).toLocaleString(); }
 
 // ── TABLE ──────────────────────────────────────────────────────────
 // Matches the "comment" field written by pull-and-save-zillow.js.
@@ -843,13 +954,14 @@ function renderTable() {
   const tbody = document.getElementById('table-body');
   tbody.innerHTML = sorted.map(d => `
     <tr data-id="${d.id}" class="${highlighted === d.id ? 'highlighted' : ''}">
-      <td class="addr">${statusBadgeHtml(d)}${d.address}</td>
+      <td class="addr">${statusBadgeHtml(d)}${escapeHtml(d.address)}${showSearchTags ? d.searches.map(s => `<span class="search-tag" title="${escapeHtml(searchName(s))}">#${s}</span>`).join('') : ''}</td>
       <td>${d.city}</td>
       <td>${d.homeType}</td>
       <td class="num">${priceCellHtml(d)}</td>
       <td class="num">${d.livingArea ? d.livingArea.toLocaleString()+' sqft' : '—'}</td>
       <td class="num">${d.lotAcres > 0 ? d.lotAcres.toFixed(3) : '—'}</td>
       <td class="num">${d.pricePerAcre ? '$'+fmt_money(d.pricePerAcre) : '—'}</td>
+      <td class="num">${d.pricePerSqft != null ? fmt_ppsf(d.pricePerSqft) : '—'}</td>
       <td class="num">${d.days_on_zillow ?? '—'}</td>
       <td class="num">${d.bedrooms ?? '—'}</td>
       <td class="num">${d.bathrooms ?? '—'}</td>
@@ -901,6 +1013,12 @@ function renderTable() {
   });
 }
 
+// Search names are filled in by the Firebase module (window.searchDefs).
+function searchName(id) {
+  const s = window.searchDefs && window.searchDefs[id];
+  return s && s.name ? `#${id} ${s.name}` : `Search #${id}`;
+}
+
 function scrollToRow(id) {
   const tr = document.querySelector(`#table-body tr[data-id="${id}"]`);
   if (tr) tr.scrollIntoView({ behavior:'smooth', block:'nearest' });
@@ -910,7 +1028,47 @@ function scrollToRow(id) {
 let scatterSvg;
 const colorScale = d3.scaleSequential(d3.interpolateRdYlGn);
 
+// Domain of the active metric across the listings that have it. Shared by
+// the scatter and the map so a property's dot and map circle match.
+function metricExtent() {
+  const m = X_MODES[xMode];
+  const vals = allData.filter(m.has).map(m.metric).filter(v => v != null && isFinite(v));
+  if (!vals.length) return [0, 1];
+  const ext = d3.extent(vals);
+  return ext[0] === ext[1] ? [ext[0] * 0.9, ext[1] * 1.1 || 1] : ext;
+}
+
+function updateColorDomain() { colorScale.domain(metricExtent()); }
+
+// Fill for a listing in the current mode (grey when it lacks the value).
+function fillFor(d) {
+  const m = X_MODES[xMode];
+  return m.has(d) && m.metric(d) != null ? colorScale(m.metric(d)) : NO_DATA_FILL;
+}
+
+window.setXMode = function setXMode(mode) {
+  if (!X_MODES[mode] || mode === xMode) return;
+  xMode = mode;
+  document.querySelectorAll('.x-toggle button').forEach(b =>
+    b.classList.toggle('on', b.dataset.mode === mode));
+  if (allData.length) { renderScatter(); styleMapMarkers(); }
+  updateModeLabels();
+};
+
+function updateModeLabels() {
+  const m = X_MODES[xMode];
+  document.getElementById('scatter-title').textContent = m.title;
+  document.getElementById('scatter-note').textContent =
+    `Circle size & color = ${m.metricUnit === 'ac/$M' ? 'acres' : 'sq ft'} per $1M · scroll to zoom, drag to pan`;
+  document.getElementById('map-note').textContent = `Circle = ${m.unitWord}÷price · click for details`;
+  document.querySelectorAll('#map-legend .legend-unit').forEach(el => el.textContent = m.unitWord);
+  const noData = document.querySelector('#map-legend .legend-nodata');
+  noData.style.display = allData.some(d => !m.has(d)) ? 'flex' : 'none';
+  noData.lastChild.textContent = ' No ' + m.missingLabel;
+}
+
 function renderScatter() {
+  const m = X_MODES[xMode];
   const container = document.getElementById('scatter-svg');
   const W = container.closest('.scatter-wrap').clientWidth || 500;
   const H = 460;
@@ -919,6 +1077,7 @@ function renderScatter() {
   const iH = H - M.top - M.bottom;
 
   d3.select('#scatter-svg').selectAll('*').remove();
+  scatterZoom = null; scatterZoomTarget = null;
 
   const svg = d3.select('#scatter-svg')
     .attr('viewBox', `0 0 ${W} ${H}`)
@@ -926,18 +1085,25 @@ function renderScatter() {
 
   scatterSvg = svg;
 
-  const data = allData.filter(d => d.lotAcres > 0 && d.price > 0);
+  const data = allData.filter(d => m.has(d) && d.price > 0);
+  const hidden = allData.length - data.length;
+
+  updateColorDomain();
+  const cExt = colorScale.domain();
+
+  if (!data.length) {
+    svg.append('text').attr('class', 'axis-label')
+      .attr('x', W / 2).attr('y', H / 2).attr('text-anchor', 'middle')
+      .text(allData.length ? `No listings with a ${m.missingLabel}` : 'No listings');
+    return;
+  }
 
   const xScale = d3.scaleLinear()
-    .domain([0, d3.max(data, d => d.lotAcres) * 1.08])
+    .domain([0, d3.max(data, m.x) * 1.08])
     .range([0, iW]);
   const yScale = d3.scaleLinear()
     .domain([0, d3.max(data, d => d.price) * 1.08])
     .range([iH, 0]);
-
-  // color by lotPerPriceMperAcre
-  const cExt = d3.extent(data, d => d.lotPerPriceMperAcre || 0);
-  colorScale.domain(cExt);
 
   // clip so zoomed/panned dots never spill outside the plot area
   svg.append('defs').append('clipPath')
@@ -966,22 +1132,27 @@ function renderScatter() {
 
   // axes
   const xAxis = g.append('g').attr('transform',`translate(0,${iH})`)
-    .call(d3.axisBottom(xScale).ticks(6).tickFormat(d => d.toFixed(2)+' ac'));
+    .call(d3.axisBottom(xScale).ticks(6).tickFormat(m.tick));
   const yAxis = g.append('g')
     .call(d3.axisLeft(yScale).ticks(6).tickFormat(d => '$'+fmt_money(d)));
 
   // axis labels
   g.append('text').attr('class','axis-label')
     .attr('x', iW/2).attr('y', iH+46).attr('text-anchor','middle')
-    .text('Lot Size (acres)');
+    .text(m.axisLabel);
   g.append('text').attr('class','axis-label')
     .attr('transform','rotate(-90)')
     .attr('x', -iH/2).attr('y', -54).attr('text-anchor','middle')
     .text('Price (USD)');
+  if (hidden > 0) {
+    g.append('text').attr('class','axis-label')
+      .attr('x', 0).attr('y', -12).attr('font-size', 9)
+      .text(`${hidden} listing${hidden > 1 ? 's' : ''} without ${m.missingLabel} not shown`);
+  }
 
   // dots (clipped, and grouped separately so zoom can reposition them)
   const rScale = d3.scaleSqrt()
-    .domain([0, d3.max(data, d => d.lotPerPriceMperAcre || 0)])
+    .domain([0, d3.max(data, d => m.metric(d) || 0) || 1])
     .range([4, 16]);
 
   const dotsG = g.append('g').attr('class', 'dots-layer').attr('clip-path', 'url(#scatter-clip)');
@@ -989,10 +1160,10 @@ function renderScatter() {
   dotsG.selectAll('.dot').data(data).enter().append('circle')
     .attr('class','dot')
     .attr('data-id', d => d.id)
-    .attr('cx', d => xScale(d.lotAcres))
+    .attr('cx', d => xScale(m.x(d)))
     .attr('cy', d => yScale(d.price))
-    .attr('r',  d => rScale(d.lotPerPriceMperAcre || 0))
-    .attr('fill', d => colorScale(d.lotPerPriceMperAcre || 0))
+    .attr('r',  d => rScale(m.metric(d) || 0))
+    .attr('fill', d => fillFor(d))
     .on('mouseenter', function(event, d) {
       setHighlight(d.id);
       showTooltip(event, d);
@@ -1001,10 +1172,16 @@ function renderScatter() {
     .on('mouseleave', function() { setHighlight(null); hideTooltip(); })
     .on('click', function(event, d) { setHighlight(d.id, true); scrollToRow(d.id); });
 
+  // keep the current highlight after a re-render (e.g. toggling the axis)
+  if (highlighted != null) {
+    dotsG.selectAll('.dot')
+      .classed('highlighted', d => d.id === highlighted)
+      .classed('dimmed', d => d.id !== highlighted);
+  }
+
   // scroll-to-zoom / drag-to-pan — lets you zoom into the dense lower-left
-  // cluster of small-lot/low-price entries. Wheel always zooms; a drag only
-  // pans (rather than fighting the dots' own click/hover handlers) when it
-  // doesn't start on a dot.
+  // cluster. Wheel always zooms; a drag only pans (rather than fighting the
+  // dots' own click/hover handlers) when it doesn't start on a dot.
   const zoom = d3.zoom()
     .scaleExtent([1, 25])
     .extent([[0, 0], [iW, iH]])
@@ -1022,11 +1199,11 @@ function renderScatter() {
       gridX.call(d3.axisBottom(zx).tickSize(-iH).tickFormat(''));
       gridX.select('.domain').remove();
 
-      xAxis.call(d3.axisBottom(zx).ticks(6).tickFormat(d => d.toFixed(2)+' ac'));
+      xAxis.call(d3.axisBottom(zx).ticks(6).tickFormat(m.tick));
       yAxis.call(d3.axisLeft(zy).ticks(6).tickFormat(d => '$'+fmt_money(d)));
 
       dotsG.selectAll('.dot')
-        .attr('cx', d => zx(d.lotAcres))
+        .attr('cx', d => zx(m.x(d)))
         .attr('cy', d => zy(d.price));
     });
 
@@ -1047,19 +1224,21 @@ function renderScatter() {
   svg.append('rect').attr('x',cbX).attr('y',cbY).attr('width',cbW).attr('height',cbH)
     .attr('fill','url(#colorbar)').attr('rx',2);
   svg.append('text').attr('class','axis-label').attr('x',cbX).attr('y',cbY-3).attr('font-size',9)
-    .text('Low lot/price$M');
+    .text('Low ' + m.metricUnit);
   svg.append('text').attr('class','axis-label').attr('x',cbX+cbW).attr('y',cbY-3).attr('text-anchor','end').attr('font-size',9)
     .text('High');
 }
 
 // ── MAP ────────────────────────────────────────────────────────────
+const DEFAULT_CENTER = [42.33, -71.19]; // Newton/Brookline, used when no coords
+
 function renderMap() {
   if (leafletMap) { leafletMap.remove(); leafletMap = null; leafletMarkers = []; }
 
-  const center = [
-    d3.mean(allData, d => d.latitude),
-    d3.mean(allData, d => d.longitude)
-  ];
+  const withCoords = allData.filter(d => d.latitude && d.longitude);
+  const center = withCoords.length
+    ? [d3.mean(withCoords, d => d.latitude), d3.mean(withCoords, d => d.longitude)]
+    : DEFAULT_CENTER;
 
   leafletMap = L.map('map', { zoomControl: true, attributionControl: false }).setView(center, 13);
 
@@ -1068,22 +1247,12 @@ function renderMap() {
     subdomains: 'abc', maxZoom: 19
   }).addTo(leafletMap);
 
-  const rScale = d3.scaleSqrt()
-    .domain(d3.extent(allData, d => d.lotPerPriceMperAcre || 0))
-    .range([6, 28]);
-
-  allData.forEach(d => {
-    if (!d.latitude || !d.longitude) return;
-    const r = rScale(d.lotPerPriceMperAcre || 0);
-    // Same color scale the scatter plot uses (by lotPerPriceMperAcre), so a
-    // property's dot and its map circle are always the same color.
-    const fill = colorScale(d.lotPerPriceMperAcre || 0);
+  withCoords.forEach(d => {
     const isFlagged = d.changeStatus === 'new' || d.changeStatus === 'changed';
     const strokeColor = isFlagged ? '#f0c040' : '#f5f2eb'; // highlight-gold ring for new/changed
     const baseWeight = isFlagged ? 3 : 1.5;
     const circle = L.circleMarker([d.latitude, d.longitude], {
-      radius: r,
-      fillColor: fill,
+      radius: 6,
       fillOpacity: 0.78,
       color: strokeColor,
       weight: baseWeight,
@@ -1091,7 +1260,7 @@ function renderMap() {
     }).addTo(leafletMap);
 
     circle._propId = d.id;
-    circle._fillColor = fill; // reused in setHighlight so fill never changes
+    circle._data = d;
     circle._strokeColor = strokeColor;
     circle._baseWeight = baseWeight;
 
@@ -1104,10 +1273,11 @@ function renderMap() {
     // function form so the popup always shows the latest note text
     const popupHtml = () => `
       ${badgeLine}
-      <strong>${d.address}</strong>
-      <div>${d.city} · ${d.homeType}</div>
+      <strong>${escapeHtml(d.address)}</strong>
+      <div>${escapeHtml(d.city)} · ${d.homeType}</div>
       <div>Price: <b>$${fmt_money(d.price)}</b></div>
-      <div>Lot: ${d.lotAcres.toFixed(3)} acres</div>
+      <div>Lot: ${d.lotAcres > 0 ? d.lotAcres.toFixed(3) + ' acres' : '—'}</div>
+      <div>Home: ${d.livingArea > 0 ? d.livingArea.toLocaleString() + ' sqft · ' + fmt_ppsf(d.pricePerSqft) + '/sqft' : '—'}</div>
       <div>Beds/Baths: ${d.bedrooms ?? '—'} / ${d.bathrooms ?? '—'}</div>
       <div>Days Listed: ${d.days_on_zillow ?? '—'}</div>
       ${d.note ? `<div style="color:#7ecbf5; white-space:pre-wrap; max-width:240px;">✎ ${escapeHtml(d.note)}</div>` : ''}
@@ -1124,6 +1294,30 @@ function renderMap() {
 
     leafletMarkers.push(circle);
   });
+
+  styleMapMarkers();
+}
+
+// Size + color every marker for the current x-axis mode. Uses the same
+// colorScale domain as the scatter. Listings missing the value get a small
+// grey circle rather than a division by zero.
+function styleMapMarkers() {
+  const m = X_MODES[xMode];
+  updateColorDomain();
+  const rScale = d3.scaleSqrt().domain(colorScale.domain()).range([6, 28]).clamp(true);
+  leafletMarkers.forEach(c => {
+    const d = c._data;
+    const has = m.has(d) && m.metric(d) != null;
+    c._fillColor = has ? colorScale(m.metric(d)) : NO_DATA_FILL;
+    c.setRadius(has ? rScale(m.metric(d)) : 5);
+    const isActive = c._propId === highlighted;
+    c.setStyle({
+      fillColor: c._fillColor,
+      weight: isActive ? 3 : c._baseWeight,
+      color: isActive ? '#0f0e0b' : c._strokeColor,
+    });
+  });
+  updateModeLabels();
 }
 
 // ── HIGHLIGHT ──────────────────────────────────────────────────────
@@ -1163,10 +1357,12 @@ function setHighlight(id, sticky = false) {
 // ── TOOLTIP ────────────────────────────────────────────────────────
 const tooltip = document.getElementById('tooltip');
 function showTooltip(event, d) {
-  tooltip.innerHTML = `<strong>${d.address}</strong>
+  tooltip.innerHTML = `<strong>${escapeHtml(d.address)}</strong>
 Price: $${fmt_money(d.price)}<br>
-Lot: ${d.lotAcres.toFixed(3)} ac · ${d.lotSqFt.toLocaleString()} sqft<br>
-Lot/Price: ${d.lotPerPriceMperAcre ? d.lotPerPriceMperAcre.toFixed(3)+' ac/$M' : '—'}<br>
+Lot: ${d.lotAcres > 0 ? d.lotAcres.toFixed(3) + ' ac · ' + Math.round(d.lotSqFt).toLocaleString() + ' sqft' : '—'}<br>
+Lot/Price: ${d.lotPerPriceMperAcre != null ? d.lotPerPriceMperAcre.toFixed(3)+' ac/$M' : '—'}<br>
+Home: ${d.livingArea > 0 ? d.livingArea.toLocaleString() + ' sqft · ' + fmt_ppsf(d.pricePerSqft) + '/sqft' : '—'}<br>
+Home/Price: ${d.sqftPerPriceM != null ? Math.round(d.sqftPerPriceM).toLocaleString()+' sqft/$M' : '—'}<br>
 ${d.bedrooms ?? '—'} bed · ${d.bathrooms ?? '—'} bath${d.note ? `<br><span style="color:#7ecbf5">✎ ${escapeHtml(d.note)}</span>` : ''}`;
   tooltip.style.display = 'block';
   moveTooltip(event);
@@ -1213,6 +1409,7 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 
 let firebaseRawData = []; // full fetched set, each item tagged with its Firestore docId
+let searchDefs = {};      // search number -> criteria doc from zillow_searches
 
 function collectionPath() {
   return `artifacts/${firebaseConfig.appId}/public/data/${COLLECTION_NAME}`;
@@ -1224,6 +1421,12 @@ function collectionPath() {
 const NOTES_COLLECTION_NAME = 'zillow_notes';
 function notesPath() {
   return `artifacts/${firebaseConfig.appId}/public/data/${NOTES_COLLECTION_NAME}`;
+}
+
+// ── SEARCHES ── criteria edited in zillow-searches.html, read by zillow.js
+const SEARCHES_COLLECTION_NAME = 'zillow_searches';
+function searchesPath() {
+  return `artifacts/${firebaseConfig.appId}/public/data/${SEARCHES_COLLECTION_NAME}`;
 }
 
 let authReady = null;
@@ -1279,6 +1482,7 @@ function mapDocToRaw(docSnap) {
     changeStatus: d.changeStatus ?? null, // 'new' | 'changed' | 'unchanged'
     priceChange: d.priceChange ?? null,
     comment: d.comment ?? null, // 'new' | 'price decrease' | 'price increase' | 'changes' | ''
+    searches: Array.isArray(d.searches) ? d.searches : null, // e.g. [1, 2]; null = legacy → #1
   };
 }
 
@@ -1308,7 +1512,7 @@ async function deleteStaleDocs(staleDocs) {
   return staleDocs.length;
 }
 
-function populateDateDropdown(records) {
+function populateDateDropdown(records, keep) {
   const dates = [...new Set(records.map(r => r.updateDate).filter(Boolean))]
     .sort((a, b) => b.localeCompare(a)); // newest first
   const select = document.getElementById('update-date-select');
@@ -1318,18 +1522,99 @@ function populateDateDropdown(records) {
       const count = records.filter(r => r.updateDate === dt).length;
       return `<option value="${dt}">${dt} (${count})</option>`;
     }).join('');
-  // Default to the most recent single date rather than everything at once.
-  if (dates.length) select.value = dates[0];
+  // Keep the user's pick if it still has results; otherwise default to the
+  // most recent single date rather than everything at once.
+  if (keep && (keep === '__all__' || dates.includes(keep))) select.value = keep;
+  else if (dates.length) select.value = dates[0];
 }
 
-window.applyDateFilter = function applyDateFilter() {
-  const selected = document.getElementById('update-date-select').value;
+// ── SEARCH FILTER ──
+// Records with no "searches" field predate search tagging → search #1.
+function searchTagsOf(r) {
+  const t = Array.isArray(r.searches) ? r.searches.map(Number).filter(Number.isFinite) : [];
+  return t.length ? t : [1];
+}
+
+function initialSearchSelection() {
+  const p = new URLSearchParams(location.search).get('search');
+  const ids = (p || '1').split(',').map(Number).filter(n => Number.isInteger(n) && n > 0);
+  return new Set(ids.length ? ids : [1]);
+}
+let selectedSearches = initialSearchSelection();
+
+function availableSearchIds() {
+  const ids = new Set(Object.keys(searchDefs).map(Number));
+  firebaseRawData.forEach(r => searchTagsOf(r).forEach(t => ids.add(t)));
+  selectedSearches.forEach(t => ids.add(t));
+  return [...ids].filter(Number.isFinite).sort((a, b) => a - b);
+}
+
+function renderSearchChips() {
+  const date = document.getElementById('update-date-select').value;
+  const inDate = r => date === '__all__' || r.updateDate === date;
+  const wrap = document.getElementById('search-chips');
+  wrap.innerHTML = availableSearchIds().map(id => {
+    const def = searchDefs[id];
+    const count = firebaseRawData.filter(r => inDate(r) && searchTagsOf(r).includes(id)).length;
+    const name = def && def.name ? def.name : 'Search';
+    const tip = def
+      ? `${(def.cities || []).join(' / ')}${def.lastRunDate ? ` · last run ${def.lastRunDate}` : ''}`
+      : 'No saved criteria for this search';
+    return `<button type="button" class="search-chip${selectedSearches.has(id) ? ' on' : ''}"
+      data-id="${id}" title="${escapeAttr(tip)}">#${id} ${escapeAttr(name)}<span class="cnt">(${count})</span></button>`;
+  }).join('');
+  wrap.querySelectorAll('.search-chip').forEach(btn => {
+    btn.onclick = () => {
+      const id = Number(btn.dataset.id);
+      if (selectedSearches.has(id)) {
+        if (selectedSearches.size === 1) return; // always keep at least one
+        selectedSearches.delete(id);
+      } else {
+        selectedSearches.add(id);
+      }
+      applyFilters({ keepDate: true });
+    };
+  });
+}
+
+function escapeAttr(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+}
+
+function syncUrl() {
+  const ids = [...selectedSearches].sort((a, b) => a - b);
+  const url = new URL(location.href);
+  if (ids.length === 1 && ids[0] === 1) url.searchParams.delete('search');
+  else url.searchParams.set('search', ids.join(','));
+  history.replaceState(null, '', url);
+}
+
+// Search selection first (it decides which dates exist), then date.
+window.applyFilters = function applyFilters(opts = {}) {
+  const select = document.getElementById('update-date-select');
+  const bySearch = firebaseRawData.filter(r => searchTagsOf(r).some(t => selectedSearches.has(t)));
+  if (opts.keepDate !== undefined || opts.rebuildDates) {
+    populateDateDropdown(bySearch, opts.keepDate ? select.value : null);
+  }
+  const selected = select.value;
   const filtered = selected === '__all__'
-    ? firebaseRawData
-    : firebaseRawData.filter(r => r.updateDate === selected);
+    ? bySearch
+    : bySearch.filter(r => r.updateDate === selected);
+  window.setShowSearchTags(selectedSearches.size > 1);
   initDashboard(filtered);
+  renderSearchChips();
+  syncUrl();
   document.getElementById('filter-bar').classList.add('visible');
 };
+window.applyDateFilter = window.applyFilters; // old name, kept for compatibility
+
+async function loadSearchDefs() {
+  const snap = await getDocs(collection(db, searchesPath()));
+  const map = {};
+  snap.docs.forEach(s => { const id = Number(s.id); if (Number.isFinite(id)) map[id] = s.data(); });
+  return map;
+}
 
 window.loadFromFirebase = async function loadFromFirebase() {
   const btn = document.getElementById('firebase-btn');
@@ -1341,11 +1626,14 @@ window.loadFromFirebase = async function loadFromFirebase() {
     await ensureAuth();
 
     status.textContent = 'Fetching listings…';
-    const [snap, notes] = await Promise.all([
+    const [snap, notes, defs] = await Promise.all([
       getDocs(collection(db, collectionPath())),
       loadNotes().catch(err => { console.error('Notes load failed', err); return {}; }),
+      loadSearchDefs().catch(err => { console.error('Searches load failed', err); return {}; }),
     ]);
     Object.assign(window.notesMap, notes);
+    searchDefs = defs;
+    window.searchDefs = defs;
     const allDocs = snap.docs.map(mapDocToRaw);
 
     status.textContent = 'Checking for old records…';
@@ -1354,11 +1642,10 @@ window.loadFromFirebase = async function loadFromFirebase() {
     const fresh = allDocs.filter(r => !isStale(r.updateDate));
 
     firebaseRawData = fresh;
-    populateDateDropdown(fresh);
 
     document.getElementById('upload-screen').style.display = 'none';
     document.getElementById('filter-bar').classList.add('visible');
-    applyDateFilter();
+    applyFilters({ rebuildDates: true });
 
     status.textContent = deletedCount > 0
       ? `Loaded ${fresh.length} listings · removed ${deletedCount} older than ${MAX_AGE_MONTHS} months`
