@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zillow Searches · Property Intelligence</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #0f0e0b;
+    --paper: #f5f2eb;
+    --cream: #ede9df;
+    --rule: #d4cfc3;
+    --accent: #b85c2a;
+    --accent2: #2a6b8a;
+    --accent3: #3d7a4f;
+    --highlight: #f0c040;
+    --danger: #b03a2e;
+    --muted: #7a7469;
+    --mono: 'DM Mono', monospace;
+    --serif: 'DM Serif Display', serif;
+    --sans: 'Instrument Sans', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--paper); color: var(--ink); font-family: var(--sans); min-height: 100vh; }
+
+  header {
+    border-bottom: 2px solid var(--ink);
+    padding: 24px 48px 20px;
+    display: flex; align-items: baseline; gap: 24px;
+    background: var(--paper); position: sticky; top: 0; z-index: 100;
+  }
+  .logo { font-family: var(--serif); font-size: 28px; letter-spacing: -0.5px; line-height: 1; }
+  .logo span { color: var(--accent); font-style: italic; }
+  .subtitle { font-family: var(--mono); font-size: 11px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; }
+  .header-right { margin-left: auto; display: flex; align-items: center; gap: 16px; }
+  .header-right a {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--accent2); text-decoration: none;
+  }
+  .header-right a:hover { text-decoration: underline; }
+  #status { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  #status.err { color: var(--danger); }
+  #status.ok { color: var(--accent3); }
+
+  .layout { display: grid; grid-template-columns: 300px 1fr; min-height: calc(100vh - 74px); }
+
+  /* ── SIDEBAR ── */
+  aside { border-right: 1px solid var(--rule); background: var(--cream); display: flex; flex-direction: column; }
+  .side-head {
+    padding: 16px 20px 12px; border-bottom: 1px solid var(--rule);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .section-num { font-family: var(--mono); font-size: 11px; color: var(--accent); letter-spacing: 0.1em; }
+  .section-title { font-size: 13px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+  #search-list { list-style: none; flex: 1; overflow-y: auto; }
+  #search-list li {
+    padding: 12px 20px; border-bottom: 1px solid var(--rule); cursor: pointer;
+    transition: background 0.1s;
+  }
+  #search-list li:hover { background: var(--paper); }
+  #search-list li.active { background: var(--paper); box-shadow: inset 3px 0 0 var(--accent); }
+  .li-top { display: flex; align-items: baseline; gap: 8px; }
+  .li-num { font-family: var(--mono); font-size: 12px; color: var(--accent); }
+  .li-name { font-weight: 600; font-size: 13px; }
+  .li-sub { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
+  .li-dirty { color: var(--accent); font-family: var(--mono); font-size: 10px; margin-left: auto; }
+  .side-foot { padding: 14px 20px; border-top: 1px solid var(--rule); display: flex; gap: 8px; }
+
+  /* ── BUTTONS ── */
+  .btn {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 8px 16px; border: 1.5px solid var(--ink); background: var(--paper); color: var(--ink);
+    cursor: pointer; transition: all 0.15s;
+  }
+  .btn:hover { background: var(--cream); }
+  .btn.primary { background: var(--ink); color: var(--paper); }
+  .btn.primary:hover { background: var(--accent); border-color: var(--accent); }
+  .btn.danger { border-color: var(--danger); color: var(--danger); }
+  .btn.danger:hover { background: var(--danger); color: var(--paper); }
+  .btn:disabled { opacity: 0.45; cursor: default; }
+  .btn.small { padding: 5px 10px; font-size: 10px; }
+
+  /* ── EDITOR ── */
+  main { padding: 0 0 48px; }
+  .editor-head {
+    padding: 16px 48px 12px; border-bottom: 1px solid var(--rule);
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  }
+  .editor-head .actions { margin-left: auto; display: flex; gap: 8px; }
+  .empty { padding: 64px 48px; color: var(--muted); font-family: var(--mono); font-size: 12px; line-height: 1.8; }
+  form { padding: 24px 48px; max-width: 980px; }
+  fieldset { border: none; border-top: 1px solid var(--rule); padding: 18px 0 8px; }
+  fieldset:first-of-type { border-top: none; padding-top: 0; }
+  legend {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--accent); padding-right: 10px;
+  }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px 20px; margin-top: 10px; }
+  .grid.two { grid-template-columns: 1fr 1fr; }
+  label.field { display: flex; flex-direction: column; gap: 5px; }
+  .lbl {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);
+  }
+  input[type=text], input[type=number], select, textarea {
+    font-family: var(--sans); font-size: 13px; padding: 7px 10px;
+    border: 1.5px solid var(--rule); background: #fff; color: var(--ink); width: 100%;
+  }
+  textarea { font-family: var(--mono); font-size: 12px; resize: vertical; min-height: 64px; line-height: 1.5; }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent2); }
+  input.invalid, textarea.invalid { border-color: var(--danger); background: rgba(176,58,46,0.05); }
+  .range { display: flex; align-items: center; gap: 8px; }
+  .range span { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .hint { font-family: var(--mono); font-size: 10px; color: var(--muted); line-height: 1.5; }
+  .types { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .type-chip {
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+    font-family: var(--mono); font-size: 11px; padding: 6px 12px;
+    border: 1.5px solid var(--rule); background: var(--paper); user-select: none;
+  }
+  .type-chip input { display: none; }
+  .type-chip.on { background: var(--accent2); border-color: var(--accent2); color: var(--paper); }
+  .errors { margin-top: 16px; padding: 10px 14px; border-left: 3px solid var(--danger); background: rgba(176,58,46,0.06);
+    font-family: var(--mono); font-size: 11px; color: var(--danger); line-height: 1.7; display: none; }
+
+  .run-box {
+    margin: 0 48px; padding: 12px 16px; background: var(--ink); color: var(--paper);
+    font-family: var(--mono); font-size: 12px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    border-left: 3px solid var(--accent);
+  }
+  .run-box code { color: var(--highlight); }
+  .run-box .meta { color: #b9b3a6; font-size: 11px; margin-left: auto; }
+  .run-box button {
+    font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+    background: none; border: 1px solid #6d675c; color: var(--paper); padding: 3px 8px; cursor: pointer;
+  }
+  .run-box button:hover { border-color: var(--highlight); color: var(--highlight); }
+
+  @media (max-width: 860px) {
+    .layout { grid-template-columns: 1fr; }
+    aside { border-right: none; border-bottom: 1px solid var(--rule); }
+    header, .editor-head, form { padding-left: 20px; padding-right: 20px; }
+    .run-box { margin: 0 20px; }
+    .grid.two { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Zillow <span>Searches</span></div>
+  <div class="subtitle">Criteria used by zillow.js</div>
+  <div class="header-right">
+    <span id="status">Connecting…</span>
+    <a href="zillow.html" id="dash-link">↩ Dashboard</a>
+  </div>
+</header>
+
+<div class="layout">
+  <aside>
+    <div class="side-head">
+      <span class="section-num">01</span>
+      <span class="section-title">Saved searches</span>
+    </div>
+    <ul id="search-list"></ul>
+    <div class="side-foot">
+      <button class="btn primary" id="add-btn" disabled>+ New search</button>
+    </div>
+  </aside>
+
+  <main>
+    <div class="editor-head">
+      <span class="section-num">02</span>
+      <span class="section-title" id="editor-title">Criteria</span>
+      <div class="actions" id="editor-actions" style="display:none;">
+        <button class="btn small" id="dup-btn" type="button">Duplicate</button>
+        <button class="btn small danger" id="del-btn" type="button">Delete</button>
+        <button class="btn small" id="revert-btn" type="button">Revert</button>
+        <button class="btn primary small" id="save-btn" type="button">Save</button>
+      </div>
+    </div>
+
+    <div id="empty" class="empty">Loading searches from Firebase…</div>
+
+    <div id="editor" style="display:none;">
+      <form id="form" autocomplete="off" onsubmit="return false;">
+        <fieldset>
+          <legend>Search</legend>
+          <div class="grid two">
+            <label class="field">
+              <span class="lbl">Name</span>
+              <input type="text" name="name" placeholder="e.g. Brookline + Newton · ≥ 0.25 ac">
+            </label>
+            <label class="field">
+              <span class="lbl">Listing type</span>
+              <select name="listingType">
+                <option value="forSale">For sale</option>
+                <option value="forRent">For rent</option>
+                <option value="sold">Recently sold</option>
+              </select>
+            </label>
+            <label class="field" style="grid-column: 1 / -1;">
+              <span class="lbl">Cities / areas — one per line</span>
+              <textarea name="cities" rows="3" placeholder="Brookline, MA&#10;Newton, MA"></textarea>
+              <span class="hint">Each line is a separate HasData --keyword search (a ZIP code also works).</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Home types</legend>
+          <div class="types" id="types"></div>
+          <div class="hint" style="margin-top:8px;">None selected = all home types.</div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Filters</legend>
+          <div class="grid">
+            <div class="field">
+              <span class="lbl">Price ($)</span>
+              <div class="range">
+                <input type="number" name="minPrice" min="0" step="1000" placeholder="min">
+                <span>–</span>
+                <input type="number" name="maxPrice" min="0" step="1000" placeholder="max">
+              </div>
+            </div>
+            <div class="field">
+              <span class="lbl">Lot size (acres)</span>
+              <div class="range">
+                <input type="number" name="minLotAcres" min="0" step="0.01" placeholder="min">
+                <span>–</span>
+                <input type="number" name="maxLotAcres" min="0" step="0.01" placeholder="max">
+              </div>
+            </div>
+            <div class="field">
+              <span class="lbl">Home size (sq ft)</span>
+              <div class="range">
+                <input type="number" name="minHomeSqft" min="0" step="50" placeholder="min">
+                <span>–</span>
+                <input type="number" name="maxHomeSqft" min="0" step="50" placeholder="max">
+              </div>
+            </div>
+            <label class="field">
+              <span class="lbl">Min beds</span>
+              <input type="number" name="minBeds" min="0" step="1" placeholder="any">
+            </label>
+            <label class="field">
+              <span class="lbl">Min baths</span>
+              <input type="number" name="minBaths" min="0" step="0.5" placeholder="any">
+            </label>
+            <label class="field">
+              <span class="lbl">Max days listed</span>
+              <input type="number" name="maxDaysListed" min="0" step="1" placeholder="any">
+            </label>
+          </div>
+          <p class="hint" style="margin-top:12px;">
+            Blank = no limit. When a filter is set, listings missing that value are excluded
+            (e.g. a vacant lot has no home size, so it fails a min home size).
+          </p>
+        </fieldset>
+
+        <fieldset>
+          <legend>Advanced</legend>
+          <div class="grid two">
+            <label class="field">
+              <span class="lbl">Max pages per city</span>
+              <input type="number" name="maxPages" min="1" max="20" step="1">
+              <span class="hint">Each page is a separate HasData call (5 credits).</span>
+            </label>
+            <label class="field">
+              <span class="lbl">Extra HasData CLI args — one per line</span>
+              <textarea name="extraCliArgs" rows="3" placeholder="--sort&#10;newest"></textarea>
+              <span class="hint">Appended verbatim to every hasdata call. Leave blank unless you know the flag.</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <div class="errors" id="errors"></div>
+      </form>
+
+      <div class="run-box">
+        <span>Run:</span><code id="run-cmd">node zillow.js 1</code>
+        <button type="button" id="copy-btn">Copy</button>
+        <span class="meta" id="run-meta"></span>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
+import {
+  getFirestore, collection, getDocs, doc, setDoc, deleteDoc, serverTimestamp,
+} from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+
+// Same public web config as zillow.html / zillow.js.
+const firebaseConfig = {
+  apiKey: "AIzaSyA9k81iD2mzPuLKBl76d6sdcLWvguDBzcs",
+  authDomain: "kids-15b5a.firebaseapp.com",
+  projectId: "kids-15b5a",
+  storageBucket: "kids-15b5a.firebasestorage.app",
+  messagingSenderId: "350263998718",
+  appId: "1:350263998718:web:8c1d356caa2df0da99cdaf",
+  measurementId: "G-7CM04QF69W",
+};
+const SEARCHES_COLLECTION_NAME = 'zillow_searches'; // matches zillow.js SEARCHES_COLLECTION
+const searchesPath = () => `artifacts/${firebaseConfig.appId}/public/data/${SEARCHES_COLLECTION_NAME}`;
+
+// Keep in sync with DEFAULT_SEARCH in zillow.js (used to seed search #1).
+const DEFAULT_SEARCH = {
+  name: 'Brookline + Newton · ≥ 0.25 ac',
+  cities: ['Brookline, MA', 'Newton, MA'],
+  listingType: 'forSale',
+  homeTypes: ['house', 'multiFamily', 'lot'],
+  minPrice: null, maxPrice: null,
+  minLotAcres: 0.25, maxLotAcres: null,
+  minHomeSqft: null, maxHomeSqft: null,
+  minBeds: null, minBaths: null, maxDaysListed: null,
+  maxPages: 5,
+  extraCliArgs: [],
+};
+
+// HasData --home-types values. house / multiFamily / lot are the ones the
+// pull script has used; the rest follow HasData's documented naming.
+const HOME_TYPES = [
+  ['house', 'Houses'],
+  ['multiFamily', 'Multi-family'],
+  ['lot', 'Lots / Land'],
+  ['townhome', 'Townhomes'],
+  ['condo', 'Condos / Co-ops'],
+  ['apartment', 'Apartments'],
+  ['manufactured', 'Manufactured'],
+];
+const NUM_FIELDS = ['minPrice', 'maxPrice', 'minLotAcres', 'maxLotAcres', 'minHomeSqft', 'maxHomeSqft',
+  'minBeds', 'minBaths', 'maxDaysListed', 'maxPages'];
+const CRITERIA_FIELDS = ['name', 'cities', 'listingType', 'homeTypes', ...NUM_FIELDS, 'extraCliArgs'];
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+const $ = id => document.getElementById(id);
+const form = $('form');
+const F = form.elements; // named inputs (form.name would be the form's own name attribute)
+let saved = {};        // id -> criteria as stored in Firebase (plus run info)
+let drafts = {};       // id -> unsaved edits (criteria only)
+let unsavedNew = new Set(); // ids created here but never saved
+let currentId = null;
+
+function setStatus(text, cls = '') { const s = $('status'); s.textContent = text; s.className = cls; }
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+}
+const numOrNull = v => (v === '' || v == null || !isFinite(Number(v))) ? null : Number(v);
+
+function criteriaOf(raw) {
+  const c = {};
+  CRITERIA_FIELDS.forEach(f => { c[f] = raw[f] ?? DEFAULT_SEARCH[f] ?? null; });
+  c.cities = Array.isArray(c.cities) ? c.cities : [];
+  c.homeTypes = Array.isArray(c.homeTypes) ? c.homeTypes : [];
+  c.extraCliArgs = Array.isArray(c.extraCliArgs) ? c.extraCliArgs : [];
+  NUM_FIELDS.forEach(f => { c[f] = numOrNull(c[f]); });
+  if (c.maxPages == null) c.maxPages = 5;
+  return c;
+}
+const sameCriteria = (a, b) => JSON.stringify(criteriaOf(a)) === JSON.stringify(criteriaOf(b));
+const isDirty = id => unsavedNew.has(id) || (drafts[id] && !sameCriteria(drafts[id], saved[id] || {}));
+const currentCriteria = id => drafts[id] || criteriaOf(saved[id] || DEFAULT_SEARCH);
+
+function summary(c) {
+  const parts = [(c.cities || []).join(' / ') || 'no cities'];
+  if (c.minLotAcres != null || c.maxLotAcres != null) parts.push(`lot ${c.minLotAcres ?? 0}–${c.maxLotAcres ?? '∞'} ac`);
+  if (c.minPrice != null || c.maxPrice != null) {
+    const k = v => v == null ? '∞' : '$' + (v >= 1e6 ? (v / 1e6).toFixed(2) + 'M' : Math.round(v / 1e3) + 'K');
+    parts.push(`${k(c.minPrice ?? 0)}–${k(c.maxPrice)}`);
+  }
+  if (c.minHomeSqft != null || c.maxHomeSqft != null) parts.push(`home ${c.minHomeSqft ?? 0}–${c.maxHomeSqft ?? '∞'} sqft`);
+  if (c.minBeds != null) parts.push(`${c.minBeds}+ bd`);
+  return parts.join(' · ');
+}
+
+// ── SIDEBAR ──
+function allIds() {
+  return [...new Set([...Object.keys(saved), ...Object.keys(drafts)].map(Number))].sort((a, b) => a - b);
+}
+
+function renderList() {
+  const ids = allIds();
+  $('search-list').innerHTML = ids.map(id => {
+    const c = currentCriteria(id);
+    const s = saved[id] || {};
+    const run = s.lastRunDate ? `last run ${s.lastRunDate}${s.lastResultCount != null ? ` · ${s.lastResultCount} results` : ''}` : 'never run';
+    return `<li data-id="${id}" class="${id === currentId ? 'active' : ''}">
+      <div class="li-top"><span class="li-num">#${id}</span><span class="li-name">${esc(c.name || 'Untitled')}</span>
+        ${isDirty(id) ? '<span class="li-dirty">● unsaved</span>' : ''}</div>
+      <div class="li-sub">${esc(summary(c))}<br>${esc(run)}</div>
+    </li>`;
+  }).join('');
+  $('search-list').querySelectorAll('li').forEach(li => li.onclick = () => select(Number(li.dataset.id)));
+}
+
+// ── FORM ──
+function buildTypeChips() {
+  $('types').innerHTML = HOME_TYPES.map(([v, label]) =>
+    `<label class="type-chip" data-v="${v}"><input type="checkbox" value="${v}">${label}</label>`).join('');
+  $('types').querySelectorAll('.type-chip').forEach(chip => {
+    const cb = chip.querySelector('input');
+    cb.addEventListener('change', () => { chip.classList.toggle('on', cb.checked); onEdit(); });
+  });
+}
+
+function fillForm(c) {
+  F.name.value = c.name || '';
+  F.listingType.value = c.listingType || 'forSale';
+  F.cities.value = (c.cities || []).join('\n');
+  NUM_FIELDS.forEach(f => { F[f].value = c[f] ?? ''; });
+  F.extraCliArgs.value = (c.extraCliArgs || []).join('\n');
+  $('types').querySelectorAll('.type-chip').forEach(chip => {
+    const on = (c.homeTypes || []).includes(chip.dataset.v);
+    chip.querySelector('input').checked = on;
+    chip.classList.toggle('on', on);
+  });
+  validate();
+}
+
+function readForm() {
+  const lines = s => s.split('\n').map(x => x.trim()).filter(Boolean);
+  const c = {
+    name: F.name.value.trim(),
+    listingType: F.listingType.value,
+    cities: lines(F.cities.value),
+    homeTypes: [...$('types').querySelectorAll('input:checked')].map(i => i.value),
+    extraCliArgs: lines(F.extraCliArgs.value),
+  };
+  NUM_FIELDS.forEach(f => { c[f] = numOrNull(F[f].value); });
+  return c;
+}
+
+function validate() {
+  const c = readForm();
+  const errs = [];
+  form.querySelectorAll('.invalid').forEach(el => el.classList.remove('invalid'));
+  const bad = (name, msg) => { errs.push(msg); F[name].classList.add('invalid'); };
+  if (!c.name) bad('name', 'Give the search a name.');
+  if (!c.cities.length) bad('cities', 'Add at least one city.');
+  [['minPrice', 'maxPrice', 'Price'], ['minLotAcres', 'maxLotAcres', 'Lot size'], ['minHomeSqft', 'maxHomeSqft', 'Home size']]
+    .forEach(([lo, hi, label]) => {
+      if (c[lo] != null && c[hi] != null && c[lo] > c[hi]) bad(hi, `${label}: min is larger than max.`);
+    });
+  NUM_FIELDS.forEach(f => { if (c[f] != null && c[f] < 0) bad(f, `${f} can't be negative.`); });
+  if (c.maxPages == null || c.maxPages < 1 || c.maxPages > 20 || !Number.isInteger(c.maxPages)) bad('maxPages', 'Max pages must be a whole number from 1 to 20.');
+  const box = $('errors');
+  box.innerHTML = errs.map(esc).join('<br>');
+  box.style.display = errs.length ? 'block' : 'none';
+  $('save-btn').disabled = errs.length > 0 || !isDirty(currentId);
+  return errs.length === 0;
+}
+
+function onEdit() {
+  if (currentId == null) return;
+  drafts[currentId] = readForm();
+  validate();
+  renderList();
+}
+form.addEventListener('input', onEdit);
+form.addEventListener('change', onEdit);
+
+function select(id) {
+  currentId = id;
+  $('empty').style.display = 'none';
+  $('editor').style.display = 'block';
+  $('editor-actions').style.display = 'flex';
+  $('editor-title').textContent = `Search #${id}`;
+  $('run-cmd').textContent = `node zillow.js ${id}`;
+  $('dash-link').href = `zillow.html?search=${id}`;
+  const s = saved[id] || {};
+  $('run-meta').textContent = s.lastRunDate
+    ? `last run ${s.lastRunDate}${s.lastResultCount != null ? ` · ${s.lastResultCount} results` : ''}`
+    : (unsavedNew.has(id) ? 'not saved yet' : 'never run');
+  $('del-btn').disabled = id === 1;
+  $('del-btn').title = id === 1 ? 'Search #1 is the default (untagged listings belong to it) and can\'t be deleted' : '';
+  fillForm(currentCriteria(id));
+  renderList();
+}
+
+// ── ACTIONS ──
+function nextId() { const ids = allIds(); return ids.length ? Math.max(...ids) + 1 : 1; }
+
+$('add-btn').onclick = () => {
+  const id = nextId();
+  const base = criteriaOf(saved[1] || DEFAULT_SEARCH);
+  drafts[id] = { ...base, name: `New search ${id}` };
+  unsavedNew.add(id);
+  select(id);
+  F.name.focus(); F.name.select();
+};
+
+$('dup-btn').onclick = () => {
+  if (currentId == null) return;
+  const id = nextId();
+  drafts[id] = { ...readForm(), name: `${F.name.value.trim() || 'Search'} (copy)` };
+  unsavedNew.add(id);
+  select(id);
+};
+
+$('revert-btn').onclick = () => {
+  if (currentId == null) return;
+  if (unsavedNew.has(currentId)) {
+    delete drafts[currentId]; unsavedNew.delete(currentId);
+    const ids = allIds(); ids.length ? select(ids[0]) : showEmpty();
+    return;
+  }
+  delete drafts[currentId];
+  select(currentId);
+};
+
+$('save-btn').onclick = async () => {
+  if (currentId == null || !validate()) return;
+  const id = currentId;
+  const c = readForm();
+  $('save-btn').disabled = true;
+  setStatus(`Saving #${id}…`);
+  try {
+    await ensureAuth();
+    const data = { ...c, searchId: id, updatedAt: serverTimestamp() };
+    if (unsavedNew.has(id)) data.createdAt = serverTimestamp();
+    // merge so lastRunAt / lastRunDate / lastResultCount written by zillow.js survive
+    await setDoc(doc(db, searchesPath(), String(id)), data, { merge: true });
+    saved[id] = { ...(saved[id] || {}), ...c, searchId: id };
+    delete drafts[id]; unsavedNew.delete(id);
+    setStatus(`Saved search #${id}`, 'ok');
+    select(id);
+  } catch (err) {
+    console.error(err);
+    setStatus(`Save failed: ${err.message}`, 'err');
+    validate();
+  }
+};
+
+$('del-btn').onclick = async () => {
+  const id = currentId;
+  if (id == null || id === 1) return;
+  if (unsavedNew.has(id)) { $('revert-btn').onclick(); return; }
+  if (!confirm(`Delete search #${id} "${currentCriteria(id).name}"?\n\nListings already tagged #${id} stay in Firebase until they age out; \`node zillow.js ${id}\` will stop working.`)) return;
+  setStatus(`Deleting #${id}…`);
+  try {
+    await ensureAuth();
+    await deleteDoc(doc(db, searchesPath(), String(id)));
+    delete saved[id]; delete drafts[id];
+    setStatus(`Deleted search #${id}`, 'ok');
+    const ids = allIds(); ids.length ? select(ids[0]) : showEmpty();
+  } catch (err) {
+    console.error(err);
+    setStatus(`Delete failed: ${err.message}`, 'err');
+  }
+};
+
+$('copy-btn').onclick = async () => {
+  try { await navigator.clipboard.writeText($('run-cmd').textContent); $('copy-btn').textContent = 'Copied'; }
+  catch { $('copy-btn').textContent = 'Select & copy'; }
+  setTimeout(() => { $('copy-btn').textContent = 'Copy'; }, 1500);
+};
+
+window.addEventListener('beforeunload', e => {
+  if (allIds().some(isDirty)) { e.preventDefault(); e.returnValue = ''; }
+});
+
+function showEmpty() {
+  currentId = null;
+  $('editor').style.display = 'none';
+  $('editor-actions').style.display = 'none';
+  $('editor-title').textContent = 'Criteria';
+  $('empty').style.display = 'block';
+  $('empty').innerHTML = 'No searches saved yet. <button class="btn small" id="seed-btn">Create default search #1</button>';
+  $('seed-btn').onclick = () => { drafts[1] = criteriaOf(DEFAULT_SEARCH); unsavedNew.add(1); select(1); };
+  renderList();
+}
+
+// ── LOAD ──
+let authReady = null;
+function ensureAuth() {
+  if (!authReady) authReady = signInAnonymously(auth).catch(err => { authReady = null; throw err; });
+  return authReady;
+}
+
+async function load() {
+  buildTypeChips();
+  try {
+    await ensureAuth();
+    const snap = await getDocs(collection(db, searchesPath()));
+    snap.docs.forEach(s => { const id = Number(s.id); if (Number.isInteger(id) && id > 0) saved[id] = s.data(); });
+    $('add-btn').disabled = false;
+    const n = Object.keys(saved).length;
+    setStatus(`${n} search${n === 1 ? '' : 'es'} loaded`, 'ok');
+    const want = Number(new URLSearchParams(location.search).get('search'));
+    const ids = allIds();
+    if (!ids.length) showEmpty();
+    else select(ids.includes(want) ? want : ids[0]);
+  } catch (err) {
+    console.error(err);
+    setStatus('Could not connect to Firebase — see console', 'err');
+    $('empty').textContent = 'Could not load searches from Firebase. Check your connection and the Firestore rules for zillow_searches, then reload.';
+  }
+}
+load();
+</script>
+</body>
+</html>
